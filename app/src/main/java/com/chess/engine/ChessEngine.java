@@ -11,30 +11,154 @@ import com.github.bhlangonijr.chesslib.Board;
 import com.github.bhlangonijr.chesslib.File;
 import com.github.bhlangonijr.chesslib.Piece;
 import com.github.bhlangonijr.chesslib.PieceType;
+import com.github.bhlangonijr.chesslib.Rank;
 import com.github.bhlangonijr.chesslib.Side;
 import com.github.bhlangonijr.chesslib.Square;
 import com.github.bhlangonijr.chesslib.move.Move;
 
-import lombok.Data;
+import lombok.Getter;
 import lombok.Setter;
 
 public class ChessEngine
 {
     @Setter
+    @Getter
     private Board board;
 
-    private static final float SCORE_TOLERANCE = 0.01f;
+    private static final float SCORE_TOLERANCE = 0.005f;
 
-    private final float DOUBLED_PAWN_PENALTY = 0.095f;
-    private final float ISOLATED_PAWN_PENALTY = 0.105f;
-    private final float DOUBLED_AND_ISOLATED_PENALTY = 0.2f;
-    private final float BACKWARDS_PAWN_PENALTY = 0.075f;
+    //#region Pawn structure penalties
+    private static final float DOUBLED_PAWN_PENALTY = 0.095f;
+    private static final float ISOLATED_PAWN_PENALTY = 0.105f;
+    private static final float DOUBLED_AND_ISOLATED_PENALTY = 0.2f;
+    //#endregion
 
-    private final float PAWN_VALUE = 1f;
-    private final float KNIGHT_VALUE = 2.85f;
-    private final float BISHOP_VALUE = 3f;
-    private final float ROOK_VALUE = 5f;
-    private final float QUEEN_VALUE = 10f;
+    //#region Piece values
+    private static final float PAWN_VALUE = 1f;
+    private static final float KNIGHT_VALUE = 2.85f;
+    private static final float BISHOP_VALUE = 3f;
+    private static final float ROOK_VALUE = 5f;
+    private static final float QUEEN_VALUE = 10f;
+    //#endregion
+
+    //#region Piece square tables
+    // favors pushed pawns, but doesn't favor overextended pawns as strongly.
+    // even pawns about to promote are not as highly regarded because
+    // they could prove to be weaknesses that can be targeted by the opponent.
+    // also, likes pawns not being pushed at the castling locations
+    private static final float[][] PAWN_PLACEMENT_TABLE_MIDDLEGAME = new float[][]
+    {
+        new float[] { QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE },
+        new float[] { 0.075f, 0.075f, 0.1f, 0.14f, 0.14f, 0.1f, 0.075f, 0.075f },
+        new float[] { 0.02f, 0.045f, 0.11f, 0.155f, 0.155f, 0.11f, 0.045f, 0.02f },
+        new float[] { 0.025f, 0.08f, 0.13f, 0.17f, 0.17f, 0.13f, 0.08f, 0.025f },
+        new float[] { 0.03f, 0.065f, 0.085f, 0.165f, 0.165f, 0.085f, 0.065f, 0.03f },
+        new float[] { 0.035f, 0f, 0.035f, 0.035f, 0.035f, 0f, 0f, 0.035f },
+        new float[] { 0.085f, 0.085f, 0.085f, -0.1f, -0.1f, 0.085f, 0.085f, 0.085f },
+        new float[] { -0.175f, -0.175f, -0.175f, -0.175f, -0.175f, -0.175f, -0.175f, -0.175f }
+    };
+
+    // favors pawns closer to promotion
+    // favors flank pawns more strongly
+    // huge jump in pawn value from 5th rank to 6th rank
+    private static final float[][] PAWN_PLACEMENT_TABLE_ENDGAME = new float[][]
+    {
+        new float[] { QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE },
+        new float[] { 2.65f, 2f, 1.85f, 1.85f, 1.85f, 1.85f, 2f, 2.65f },
+        new float[] { 1.75f, 1.65f, 1.6f, 1.6f, 1.6f, 1.6f, 1.65f, 1.75f },
+        new float[] { 0.4f, 0.3f, 0.225f, 0.225f, 0.225f, 0.225f, 0.3f, 0.4f },
+        new float[] { 0.175f, 0.15f, 0.125f, 0.125f, 0.125f, 0.125f, 0.15f, 0.175f },
+        new float[] { -0.075f, -0.075f, -0.075f, -0.075f, -0.075f, -0.075f, -0.075f, -0.075f },
+        new float[] { -0.15f, -0.15f, -0.15f, -0.15f, -0.15f, -0.15f, -0.15f, -0.15f },
+        new float[] { -0.25f, -0.25f, -0.25f, -0.25f, -0.25f, -0.25f, -0.25f, -0.25f }
+    };
+
+    // favors knights closer to the center
+    // knights on opponent's edge are not punished as harshly
+    // because they are likely applying some pressure to the opponent's position
+    private static final float[][] KNIGHT_PLACEMENT_TABLE = new float[][]
+    {
+        new float[] { -0.155f, -0.075f, -0.075f, -0.075f, -0.075f, -0.075f, -0.075f, -0.155f },
+        new float[] { -0.135f, 0.035f, 0.05f, 0.05f, 0.05f, 0.05f, 0.035f, -0.135f },
+        new float[] { -0.11f, 0.1f, 0.125f, 0.1f, 0.1f, 0.125f, 0.1f, -0.11f },
+        new float[] { -0.1f, 0.125f, 0.175f, 0.175f, 0.175f, 0.175f, 0.125f, -0.1f },
+        new float[] { -0.1f, 0.125f, 0.175f, 0.175f, 0.175f, 0.175f, 0.125f, -0.1f },
+        new float[] { -0.125f, 0.1f, 0.125f, 0.1f, 0.1f, 0.125f, 0.1f, -0.125f },
+        new float[] { -0.175f, 0.035f, 0.05f, 0.05f, 0.05f, 0.05f, 0.035f, -0.175f },
+        new float[] { -0.25f, -0.1f, -0.1f, -0.1f, -0.1f, -0.1f, -0.1f, -0.25f }
+    };
+
+    // favors bishops closer to the center
+    // slight buff given to bishops in fianchetto position
+    // compared to other squares in the same rank
+    private static final float[][] BISHOP_PLACEMENT_TABLE = new float[][]
+    {
+        new float[] { -0.2f, -0.25f, -0.25f, -0.25f, -0.25f, -0.25f, -0.25f, -0.2f },
+        new float[] { -0.175f, 0.125f, 0.12f, 0.12f, 0.12f, 0.12f, 0.125f, -0.175f },
+        new float[] { 0.15f, 0.14f, 0.15f, 0.15f, 0.15f, 0.15f, 0.14f, 0.15f },
+        new float[] { -0.125f, 0.165f, 0.175f, 0.18f, 0.18f, 0.175f, 0.165f, -0.125f },
+        new float[] { -0.12f, 0.155f, 0.1675f, 0.175f, 0.175f, 0.1675f, 0.155f, -0.12f },
+        new float[] { -0.15f, 0.14f, 0.15f, 0.15f, 0.15f, 0.15f, 0.14f, -0.15f },
+        new float[] { -0.175f, 0.125f, 0.12f, 0.12f, 0.12f, 0.12f, 0.125f, -0.175f },
+        new float[] { -0.2f, -0.25f, -0.25f, -0.25f, -0.25f, -0.25f, -0.25f, -0.2f }
+    };
+
+    // favors rooks closer to the center
+    // also rooks near the enemy's side
+    // and rooks in the middle two files
+    private static final float[][] ROOK_PLACEMENT_TABLE = new float[][]
+    {
+        new float[] { 0.125f, 0.145f, 0.16f, 0.185f, 0.185f, 0.16f, 0.145f, 0.125f },
+        new float[] { 0.125f, 0.145f, 0.16f, 0.185f, 0.185f, 0.16f, 0.145f, 0.125f },
+        new float[] { 0.1f, 0.135f, 0.15f, 0.15f, 0.15f, 0.15f, 0.135f, 0.1f },
+        new float[] { 0.085f, 0.145f, 0.16f, 0.19f, 0.19f, 0.16f, 0.145f, 0.085f },
+        new float[] { 0.05f, 0.145f, 0.16f, 0.19f, 0.19f, 0.16f, 0.145f, 0.05f },
+        new float[] { 0f, 0.12f, 0.12f, 0.135f, 0.135f, 0.12f, 0.12f, 0f },
+        new float[] { -0.1f, 0.065f, 0.065f, 0.085f, 0.085f, 0.065f, 0.065f, -0.1f },
+        new float[] { -0.1f, -0.075f, 0.025f, 0.075f, 0.075f, 0.025f, -0.075f, -0.1f }
+    };
+
+    // favors queens closer to the center. harshly peanlizes queens at the edges
+    // slightly buffs queens on the opponent's edge of the board
+    private static final float[][] QUEEN_PLACEMENT_TABLE = new float[][]
+    {
+        new float[] { -0.125f, 0.035f, 0.045f, 0.045f, 0.045f, 0.045f, 0.035f, -0.125f },
+        new float[] { -0.075f, 0.07f, 0.095f, 0.095f, 0.095f, 0.095f, 0.07f, -0.075f },
+        new float[] { -0.035f, 0.085f, 0.1f, 0.125f, 0.125f, 0.1f, 0.085f, -0.035f },
+        new float[] { 0f, 0.085f, 0.1f, 0.185f, 0.185f, 0.1f, 0.085f, 0f },
+        new float[] { 0f, 0.085f, 0.1f, 0.185f, 0.185f, 0.1f, 0.085f, 0f },
+        new float[] { -0.035f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, -0.035f },
+        new float[] { -0.075f, 0.065f, 0.065f, 0.07f, 0.07f, 0.065f, 0.065f, -0.075f },
+        new float[] { -0.125f, -0.025f, 0f, 0.045f, 0.045f, 0f, -0.025f, -0.125f }
+    };
+
+    // buffs hiding in the corners on the king's side
+    // heavily punishes being in the opponent's side or in the middle
+    private static final float[][] KING_PLACEMENT_TABLE_MIDDLEGAME = new float[][]
+    {
+        new float[] { -QUEEN_VALUE, -QUEEN_VALUE, -QUEEN_VALUE, -QUEEN_VALUE, -QUEEN_VALUE, -QUEEN_VALUE, -QUEEN_VALUE, -QUEEN_VALUE },
+        new float[] { -4f, -5f, -6f, -8f, -8f, -6f, -5f, -4f },
+        new float[] { -4f, -5f, -6f, -8f, -8f, -6f, -5f, -4f },
+        new float[] { -4f, -5f, -6f, -8f, -8f, -6f, -5f, -4f },
+        new float[] { -1f, -1.75f, -2.5f, -4f, -4f, -2.5f, -1.75f, -1f },
+        new float[] { -0.185f, -0.3f, -0.45f, -0.75f, -0.75f, -0.45f, -0.3f, -0.185f },
+        new float[] { 0.035f, 0.035f, 0.035f, -0.115f, -0.115f, 0.035f, 0.035f, 0.035f },
+        new float[] { 0.175f, 0.15f, 0.1f, -0.1f, -0.1f, 0.1f, 0.15f, 0.175f }
+    };
+
+    // same as queen's placement table
+    private static final float[][] KING_PLACEMENT_TABLE_ENDGAME = new float[][]
+    {
+        new float[] { -0.125f, 0.035f, 0.045f, 0.045f, 0.045f, 0.045f, 0.035f, -0.125f },
+        new float[] { -0.075f, 0.07f, 0.095f, 0.095f, 0.095f, 0.095f, 0.07f, -0.075f },
+        new float[] { -0.035f, 0.085f, 0.1f, 0.125f, 0.125f, 0.1f, 0.085f, -0.035f },
+        new float[] { 0f, 0.085f, 0.1f, 0.185f, 0.185f, 0.1f, 0.085f, 0f },
+        new float[] { 0f, 0.085f, 0.1f, 0.185f, 0.185f, 0.1f, 0.085f, 0f },
+        new float[] { -0.035f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, 0.1f, -0.035f },
+        new float[] { -0.075f, 0.065f, 0.065f, 0.07f, 0.07f, 0.065f, 0.065f, -0.075f },
+        new float[] { -0.125f, -0.025f, 0f, 0.045f, 0.045f, 0f, -0.025f, -0.125f }
+    };
+    //#endregion
 
     public ChessEngine(Board _board)
     {
@@ -43,490 +167,22 @@ public class ChessEngine
 
     //#region Searching
     /**
-     * Finds the best move for the engine's Chess board using the Minimax algorithm.
-     * @param _initialPerspective the side whose turn it is
-     * @param _curPerspective set as the same value as initial perspective
-     * @param _maxDepth the depth (number of moves in the future) to calculate to
-     * @param _depth set as 0
-     * @param _rootMove set as null
-     * @return the best move, along with the score of the move, for the side whose turn it is
-     */
-    private ScoredMove FindBestMove(Side _initialPerspective, Side _curPerspective,
-    int _maxDepth, int _depth, ScoredMove _rootMove)
-    {
-        if (board.isDraw()) return new ScoredMove(_rootMove.getMove(), 0f);
-
-        if (board.isMated())
-        {
-            Square _whiteKingLocation = board.getKingSquare(Side.WHITE);
-
-            if (board.squareAttackedBy(_whiteKingLocation, Side.BLACK) != 0L)
-                return new ScoredMove(_rootMove.getMove(), -Float.MAX_VALUE);
-
-            else return new ScoredMove(_rootMove.getMove(), Float.MAX_VALUE);
-        }
-
-        if (_depth == _maxDepth)
-            return new ScoredMove(_maxDepth == 0 ? null : _rootMove.getMove(), Evaluate());
-        
-
-        ScoredMove _bestMoveForSide = null;
-        List<ScoredMove> _equalMoves = new ArrayList<>(0);
-        for (Move _curMove : board.legalMoves())
-        {
-            if (_depth == 0) _rootMove = new ScoredMove(_curMove, 0f);
-
-            board.doMove(_curMove);
-
-            ScoredMove _scoredMove = FindBestMove
-            (
-                _initialPerspective, _curPerspective.flip(),
-                _maxDepth, _depth + 1, _rootMove
-            );
-
-            board.undoMove();
-
-            if (_bestMoveForSide == null)
-            {
-                _bestMoveForSide = _scoredMove;
-                _equalMoves.add(_scoredMove);
-            }
-
-            if (_scoredMove.getScore() + SCORE_TOLERANCE > _bestMoveForSide.getScore()
-                && _scoredMove.getScore() - SCORE_TOLERANCE < _bestMoveForSide.getScore())
-            {
-                _equalMoves.add(_scoredMove);
-            }
-
-            else if (_curPerspective == Side.WHITE)
-            {
-                if (_scoredMove.getScore() > _bestMoveForSide.getScore())
-                {
-                    _bestMoveForSide = _scoredMove;
-                    _equalMoves.clear();
-                    _equalMoves.add(_scoredMove);
-                }
-            }
-
-            else
-            {
-                if (_scoredMove.getScore() < _bestMoveForSide.getScore())
-                {
-                    _bestMoveForSide = _scoredMove;
-                    _equalMoves.clear();
-                    _equalMoves.add(_scoredMove);
-                }
-            }
-        }
-
-        // only if depth is zero because this method
-        // only returns the root move, so this won't
-        // affect the outcome for other depths
-        if (_depth == 0 && _equalMoves.size() > 1)
-        {
-            int _randIndex = new Random().nextInt(_equalMoves.size());
-
-            _bestMoveForSide = _equalMoves.get(_randIndex);
-            _rootMove = _equalMoves.get(_randIndex);
-        }
-
-        else if (_initialPerspective == Side.WHITE)
-        {
-            if (_bestMoveForSide.getScore() > _rootMove.getScore())
-                _rootMove = new ScoredMove(_rootMove.getMove(), _bestMoveForSide.getScore());
-        }
-
-        else
-        {
-            if (_bestMoveForSide.getScore() < _rootMove.getScore())
-                _rootMove = new ScoredMove(_rootMove.getMove(), _bestMoveForSide.getScore());
-        }
-
-        return _bestMoveForSide;
-    }
-
-    /**
-     * Finds the best move for the engine's Chess board using the Minimax algorithm.
-     * In addition, the function "returns" the number of moves that were evaluated
-     * using the org.apache.commons.lang3.mutable.MutableInt class.
-     * @param _initialPerspective the side whose turn it is
-     * @param _curPerspective set as the same value as initial perspective
-     * @param _maxDepth the depth (number of moves in the future) to calculate to
-     * @param _depth set as 0
-     * @param _rootMove set as null
-     * @param _numMovesEvaluated an object holding the number of positions that were evaluated
-     * while finding the best move
-     * @return the best move, along with the score of the move, for the side whose turn it is
-     */
-    private ScoredMove FindBestMove(Side _initialPerspective, Side _curPerspective,
-    int _maxDepth, int _depth, ScoredMove _rootMove, MutableInt _numMovesEvaluated)
-    {
-        if (board.isDraw()) return new ScoredMove(_rootMove.getMove(), 0f);
-
-        if (board.isMated())
-        {
-            Square _whiteKingLocation = board.getKingSquare(Side.WHITE);
-
-            if (board.squareAttackedBy(_whiteKingLocation, Side.BLACK) != 0L)
-                return new ScoredMove(_rootMove.getMove(), -Float.MAX_VALUE);
-
-            else return new ScoredMove(_rootMove.getMove(), Float.MAX_VALUE);
-        }
-
-        if (_depth == _maxDepth)
-        {
-            if (_rootMove == null)
-            {
-                throw new IllegalArgumentException("Max depth cannot be zero.");
-            }
-
-            return new ScoredMove(_rootMove.getMove(), Evaluate());
-        }
-        
-
-        ScoredMove _bestMoveForSide = null;
-        List<ScoredMove> _equalMoves = new ArrayList<>(0);
-        for (Move _curMove : board.legalMoves())
-        {
-            _numMovesEvaluated.increment();
-
-            if (_depth == 0) _rootMove = new ScoredMove(_curMove, 0f);
-
-            board.doMove(_curMove);
-
-            ScoredMove _scoredMove = FindBestMove
-            (
-                _initialPerspective, _curPerspective.flip(),
-                _maxDepth, _depth + 1, _rootMove, _numMovesEvaluated
-            );
-
-            board.undoMove();
-
-            if (_bestMoveForSide == null)
-            {
-                _bestMoveForSide = _scoredMove;
-                _equalMoves.add(_scoredMove);
-            }
-
-            if (_scoredMove.getScore() + SCORE_TOLERANCE > _bestMoveForSide.getScore()
-                && _scoredMove.getScore() - SCORE_TOLERANCE < _bestMoveForSide.getScore())
-            {
-                _equalMoves.add(_scoredMove);
-            }
-
-            else if (_curPerspective == Side.WHITE)
-            {
-                if (_scoredMove.getScore() > _bestMoveForSide.getScore())
-                {
-                    _bestMoveForSide = _scoredMove;
-                    _equalMoves.clear();
-                    _equalMoves.add(_scoredMove);
-                }
-            }
-
-            else
-            {
-                if (_scoredMove.getScore() < _bestMoveForSide.getScore())
-                {
-                    _bestMoveForSide = _scoredMove;
-                    _equalMoves.clear();
-                    _equalMoves.add(_scoredMove);
-                }
-            }
-        }
-
-        // only if depth is zero because this method
-        // only returns the root move, so this won't
-        // affect the outcome for other depths
-        if (_depth == 0 && _equalMoves.size() > 1)
-        {
-            int _randIndex = new Random().nextInt(_equalMoves.size());
-
-            _bestMoveForSide = _equalMoves.get(_randIndex);
-            _rootMove = _equalMoves.get(_randIndex);
-        }
-
-        else if (_initialPerspective == Side.WHITE)
-        {
-            if (_bestMoveForSide.getScore() > _rootMove.getScore())
-                _rootMove = new ScoredMove(_rootMove.getMove(), _bestMoveForSide.getScore());
-        }
-
-        else
-        {
-            if (_bestMoveForSide.getScore() < _rootMove.getScore())
-                _rootMove = new ScoredMove(_rootMove.getMove(), _bestMoveForSide.getScore());
-        }
-
-        return _bestMoveForSide;
-    }
-
-    /**
-     * Finds the best move for the engine's Chess board using the Minimax algorithm and alpha beta pruning.
-     * @param _initialPerspective the side whose turn it is
-     * @param _curPerspective set as the same value as initial perspective
-     * @param _maxDepth the depth (number of moves in the future) to calculate to
-     * @param _depth set as 0
-     * @param _rootMove set as null
-     * @param _alpha set as -Float.MAX_VALUE
-     * @param _beta set as Float.MAX_VALUE
-     * @return the best move, along with the score of the move, for the side whose turn it is
-     */
-    private ScoredMove FindBestMove(Side _initialPerspective, Side _curPerspective,
-    int _maxDepth, int _depth, ScoredMove _rootMove, float _alpha, float _beta)
-    {
-        if (board.isDraw()) return new ScoredMove(_rootMove.getMove(), 0f);
-
-        if (board.isMated())
-        {
-            Square _whiteKingLocation = board.getKingSquare(Side.WHITE);
-
-            if (board.squareAttackedBy(_whiteKingLocation, Side.BLACK) != 0L)
-                return new ScoredMove(_rootMove.getMove(), -Float.MAX_VALUE);
-
-            else return new ScoredMove(_rootMove.getMove(), Float.MAX_VALUE);
-        }
-
-        if (_depth == _maxDepth)
-            return new ScoredMove(_maxDepth == 0 ? null : _rootMove.getMove(), Evaluate());
-
-        ScoredMove _bestMoveForSide = null;
-        List<ScoredMove> _equalMoves = new ArrayList<>(0);
-        for (Move _curMove : board.legalMoves())
-        {
-            if (_depth == 0) _rootMove = new ScoredMove(_curMove, 0f);
-
-            board.doMove(_curMove);
-
-            ScoredMove _scoredMove = FindBestMove
-            (
-                _initialPerspective, _curPerspective.flip(),
-                _maxDepth, _depth + 1, _rootMove, _alpha, _beta
-            );
-
-            board.undoMove();
-
-            if (_bestMoveForSide == null)
-            {
-                _bestMoveForSide = _scoredMove;
-                _equalMoves.add(_scoredMove);
-            }
-
-            if (_scoredMove.getScore() + SCORE_TOLERANCE > _bestMoveForSide.getScore()
-                && _scoredMove.getScore() - SCORE_TOLERANCE < _bestMoveForSide.getScore())
-            {
-                _equalMoves.add(_scoredMove);
-            }
-
-            else if (_curPerspective == Side.WHITE)
-            {
-                if (_scoredMove.getScore() > _bestMoveForSide.getScore())
-                {
-                    _bestMoveForSide = _scoredMove;
-                    _equalMoves.clear();
-                    _equalMoves.add(_scoredMove);
-                }
-
-                _alpha = Math.max(_alpha, _bestMoveForSide.getScore());
-                if (_alpha >= _beta)
-                {
-                    System.out.println("Pruning because black has a better option");
-                    System.out.println("Alpha: " + _alpha);
-                    System.out.println("Beta: " + _beta);
-                    System.out.println("Best move for white so far: " + _bestMoveForSide);
-                    break;
-                }
-            }
-
-            else
-            {
-                if (_scoredMove.getScore() < _bestMoveForSide.getScore())
-                {
-                    _bestMoveForSide = _scoredMove;
-                    _equalMoves.clear();
-                    _equalMoves.add(_scoredMove);
-                }
-
-                _beta = Math.min(_beta, _bestMoveForSide.getScore());
-                if (_beta <= _alpha)
-                {
-                    System.out.println("Pruning because white has a better option");
-                    System.out.println("Beta: " + _beta);
-                    System.out.println("Alpha: " + _alpha);
-                    System.out.println("Best move for black so far: " + _bestMoveForSide);
-                    break;
-                }
-            }
-        }
-
-        // only if depth is zero because this method
-        // only returns the root move, so this won't
-        // affect the outcome for other depths
-        if (_depth == 0 && _equalMoves.size() > 1)
-        {
-            int _randIndex = new Random().nextInt(_equalMoves.size());
-
-            _bestMoveForSide = _equalMoves.get(_randIndex);
-            _rootMove = _equalMoves.get(_randIndex);
-        }
-
-        else if (_initialPerspective == Side.WHITE)
-        {
-            if (_bestMoveForSide.getScore() > _rootMove.getScore())
-                _rootMove = new ScoredMove(_rootMove.getMove(), _bestMoveForSide.getScore());
-        }
-
-        else
-        {
-            if (_bestMoveForSide.getScore() < _rootMove.getScore())
-                _rootMove = new ScoredMove(_rootMove.getMove(), _bestMoveForSide.getScore());
-        }
-
-        return _bestMoveForSide;
-    }
-
-    /**
-     * Finds the best move for the engine's Chess board using the Minimax algorithm and alpha beta pruning.
-     * In addition, the function "returns" the number of moves that were evaluated
-     * using the org.apache.commons.lang3.mutable.MutableInt class.
-     * @param _initialPerspective the side whose turn it is
-     * @param _curPerspective set as the same value as initial perspective
-     * @param _maxDepth the depth (number of moves in the future) to calculate to
-     * @param _depth set as 0
-     * @param _rootMove set as null
-     * @param _alpha set as -Float.MAX_VALUE
-     * @param _beta set as Float.MAX_VALUE
-     * @param _numMovesEvaluated an object holding the number of positions that were evaluated
-     * while finding the best move
-     * @return the best move, along with the score of the move, for the side whose turn it is
-     */
-    private ScoredMove FindBestMove(Side _initialPerspective, Side _curPerspective,
-    int _maxDepth, int _depth, ScoredMove _rootMove, float _alpha, float _beta,
-    MutableInt _numMovesEvaluated)
-    {
-        if (board.isDraw()) return new ScoredMove(_rootMove.getMove(), 0f);
-
-        if (board.isMated())
-        {
-            Square _whiteKingLocation = board.getKingSquare(Side.WHITE);
-
-            if (board.squareAttackedBy(_whiteKingLocation, Side.BLACK) != 0L)
-                return new ScoredMove(_rootMove.getMove(), -Float.MAX_VALUE);
-
-            else return new ScoredMove(_rootMove.getMove(), Float.MAX_VALUE);
-        }
-
-        if (_depth == _maxDepth)
-        {
-            _numMovesEvaluated.increment();
-            return new ScoredMove(_maxDepth == 0 ? null : _rootMove.getMove(), Evaluate());
-        }
-
-        ScoredMove _bestMoveForSide = null;
-        List<ScoredMove> _equalMoves = new ArrayList<>(0);
-        for (Move _curMove : board.legalMoves())
-        {
-            if (_depth == 0) _rootMove = new ScoredMove(_curMove, 0f);
-
-            board.doMove(_curMove);
-
-            ScoredMove _scoredMove = FindBestMove
-            (
-                _initialPerspective, _curPerspective.flip(),
-                _maxDepth, _depth + 1, _rootMove, _alpha, _beta, _numMovesEvaluated
-            );
-
-            board.undoMove();
-
-            if (_bestMoveForSide == null)
-            {
-                _bestMoveForSide = _scoredMove;
-                _equalMoves.add(_scoredMove);
-            }
-
-            if (_scoredMove.getScore() + SCORE_TOLERANCE > _bestMoveForSide.getScore()
-                && _scoredMove.getScore() - SCORE_TOLERANCE < _bestMoveForSide.getScore())
-            {
-                _equalMoves.add(_scoredMove);
-            }
-
-            else if (_curPerspective == Side.WHITE)
-            {
-                if (_scoredMove.getScore() > _bestMoveForSide.getScore())
-                {
-                    _bestMoveForSide = _scoredMove;
-                    _equalMoves.clear();
-                    _equalMoves.add(_scoredMove);
-                }
-
-                _alpha = Math.max(_alpha, _bestMoveForSide.getScore());
-                if (_alpha >= _beta)
-                {
-                    // System.out.println("Pruning because black has a better option");
-                    // System.out.println("Alpha: " + _alpha);
-                    // System.out.println("Beta: " + _beta);
-                    // System.out.println("Best move for white so far: " + _bestMoveForSide);
-                    break;
-                }
-            }
-
-            else
-            {
-                if (_scoredMove.getScore() < _bestMoveForSide.getScore())
-                {
-                    _bestMoveForSide = _scoredMove;
-                    _equalMoves.clear();
-                    _equalMoves.add(_scoredMove);
-                }
-
-                _beta = Math.min(_beta, _bestMoveForSide.getScore());
-                if (_beta <= _alpha)
-                {
-                    // System.out.println("Pruning because white has a better option");
-                    // System.out.println("Beta: " + _beta);
-                    // System.out.println("Alpha: " + _alpha);
-                    // System.out.println("Best move for black so far: " + _bestMoveForSide);
-                    break;
-                }
-            }
-        }
-
-        // only if depth is zero because this method
-        // only returns the root move, so this won't
-        // affect the outcome for other depths
-        if (_depth == 0 && _equalMoves.size() > 1)
-        {
-            int _randIndex = new Random().nextInt(_equalMoves.size());
-
-            _bestMoveForSide = _equalMoves.get(_randIndex);
-            _rootMove = _equalMoves.get(_randIndex);
-        }
-
-        else if (_initialPerspective == Side.WHITE)
-        {
-            if (_bestMoveForSide.getScore() > _rootMove.getScore())
-                _rootMove = new ScoredMove(_rootMove.getMove(), _bestMoveForSide.getScore());
-        }
-
-        else
-        {
-            if (_bestMoveForSide.getScore() < _rootMove.getScore())
-                _rootMove = new ScoredMove(_rootMove.getMove(), _bestMoveForSide.getScore());
-        }
-
-        return _bestMoveForSide;
-    }
-
-    /**
      * Finds the best move for the side to move according to the engine's internal Chess board.
-     * Various optimizations can be turned on and off using the SearchingArgs object that is passed in.
-     * @param _args the arguments for the search
-     * @return the best move for the side to move
-     * @throws IllegalArgumentException when the number of plies in the SearchingArgs object is less than 0.
+     * Various optimizations can be turned on and off using the boolean parameters.
+     * @param _numPlies the max number of plies to search into
+     * @param _shouldUseAlphaBetaPruning a boolean flag that determines if alpha beta pruning is used
+     * @param _shouldUseHeuristicMoveOrdering a boolean flag that determines if heuristic move ordering is used
+     * @param _numMovesEvaluatedReciever an object to count the number of moves evaluated.
+     * If move counting is not required, set this parameter to null.
+     * @return the best move for the side to move in the engine's internal board
+     * @throws IllegalArgumentException if _numPlies is less than 0
      */
-    public ScoredMove FindBestMove(SearchingArgs _args) throws IllegalArgumentException
+    public ScoredMove FindBestMove(int _numPlies, boolean _shouldUseAlphaBetaPruning,
+    boolean _shouldUseHeuristicMoveOrdering, MutableInt _numMovesEvaluatedReciever)
+    throws IllegalArgumentException
     {
-        if (board.isDraw()) return new ScoredMove(new Move(Square.NONE, Square.NONE), 0f);
+        if (board.isDraw())
+            return new ScoredMove(new Move(Square.NONE, Square.NONE), 0f);
 
         if (board.isMated())
         {
@@ -535,78 +191,86 @@ public class ChessEngine
             if (board.squareAttackedBy(_whiteKingLocation, Side.BLACK) != 0L)
                 return new ScoredMove(new Move(Square.NONE, Square.NONE), -Float.MAX_VALUE);
 
-            else return new ScoredMove(new Move(Square.NONE, Square.NONE), Float.MAX_VALUE);
+            // if white king isn't in check, then the black king must be
+            else
+                return new ScoredMove(new Move(Square.NONE, Square.NONE), Float.MAX_VALUE);
         }
 
-        if (_args.getNumPlies() < 0)
+        //#region Argument checking
+        if (_numPlies < 0)
         {
             throw new IllegalArgumentException("The \"maxDepth\" parameter for the given" +
-            " SearchingArgs is " + _args.getNumPlies() + " when it should be greater than or equal to 0.");
+            " SearchingArgs is " + _numPlies + " when it should be greater than or equal to 0.");
         }
+        //#endregion
 
         List<Move> _sortedLegalMoves = board.legalMoves();
 
-        if (_args.isShouldUseHeuristicMoveOrdering()) SortMovesHeuristically(_sortedLegalMoves);
+        if (_shouldUseHeuristicMoveOrdering) SortMovesHeuristically(_sortedLegalMoves, false);
 
         ScoredMove _bestMoveForSide = null;
+
         Side _initialPerspective = board.getSideToMove();
         float _alpha = -Float.MAX_VALUE;
         float _beta = Float.MAX_VALUE;
 
         List<ScoredMove> _equalMoves = new ArrayList<>(0);
-        
+
         for (Move _curMove : _sortedLegalMoves)
         {
             ScoredMove _rootMove = new ScoredMove(_curMove, 0f);
 
             board.doMove(_curMove);
 
-            ScoredMove _scoredMove = FindBestMove
+            ScoredMove _opponentBestResponse = FindBestMove
             (
-                _args, _initialPerspective, _rootMove,
-                board.getSideToMove(), _alpha, _beta, 1
+                _numPlies, _shouldUseAlphaBetaPruning, _shouldUseHeuristicMoveOrdering,
+                _numMovesEvaluatedReciever, _rootMove, _initialPerspective.flip(),
+                _alpha, _beta, 2
             );
 
             board.undoMove();
 
             if (_bestMoveForSide == null)
             {
-                _bestMoveForSide = _scoredMove;
-                _equalMoves.add(_scoredMove);
+                _bestMoveForSide = new ScoredMove(_curMove, _opponentBestResponse.getScore());
+                _equalMoves.add(_bestMoveForSide);
             }
 
-            if (_scoredMove.getScore() + SCORE_TOLERANCE > _bestMoveForSide.getScore()
-                && _scoredMove.getScore() - SCORE_TOLERANCE < _bestMoveForSide.getScore())
+            if (_opponentBestResponse.getScore() + SCORE_TOLERANCE > _bestMoveForSide.getScore()
+                && _opponentBestResponse.getScore() - SCORE_TOLERANCE < _bestMoveForSide.getScore())
             {
-                _equalMoves.add(_scoredMove);
+                _equalMoves.add(_bestMoveForSide);
             }
 
             else if (_initialPerspective == Side.WHITE)
             {
-                if (_scoredMove.getScore() > _bestMoveForSide.getScore())
+                if (_opponentBestResponse.getScore() > _bestMoveForSide.getScore())
                 {
-                    _bestMoveForSide = _scoredMove;
+                    _bestMoveForSide = new ScoredMove(_curMove, _opponentBestResponse.getScore());
                     _equalMoves.clear();
-                    _equalMoves.add(_scoredMove);
+                    _equalMoves.add(_bestMoveForSide);
                 }
-
+                
+                if (_shouldUseAlphaBetaPruning && _bestMoveForSide.getScore() >= _beta) break;
+                
                 _alpha = Math.max(_alpha, _bestMoveForSide.getScore());
+                
             }
 
             else
             {
-                if (_scoredMove.getScore() < _bestMoveForSide.getScore())
+                if (_opponentBestResponse.getScore() < _bestMoveForSide.getScore())
                 {
-                    _bestMoveForSide = _scoredMove;
+                    _bestMoveForSide = new ScoredMove(_curMove, _opponentBestResponse.getScore());
                     _equalMoves.clear();
-                    _equalMoves.add(_scoredMove);
+                    _equalMoves.add(_bestMoveForSide);
                 }
-
+                
+                if (_shouldUseAlphaBetaPruning && _bestMoveForSide.getScore() <= _alpha) break;
+                
                 _beta = Math.min(_beta, _bestMoveForSide.getScore());
             }
-
-            if (_args.isShouldUseAlphaBetaPruning() && _beta <= _alpha)
-                break;
         }
 
         // only with the initial call because this method
@@ -618,24 +282,31 @@ public class ChessEngine
             _bestMoveForSide = _equalMoves.get(_randIndex);
         }
 
+        // System.out.println(_equalMoves);
+
         return _bestMoveForSide;
     }
 
-
     /**
      * Internal function for recursion so that outside callers do not need to pass in every parameter.
-     * @param _args
-     * @param _initialPerspective
+     * @param _numPlies
+     * @param _shouldUseAlphaBetaPruning
+     * @param _shouldUseHeuristicMoveOrdering
+     * @param _numPositionsEvaluatedReciever
      * @param _rootMove
      * @param _curPerspective
      * @param _alpha
      * @param _beta
      * @param _ply
-     * @return the best move for the side to move
+     * @return the best move for the side to move, which is determined by the engine's Chess board.
      */
-    private ScoredMove FindBestMove(SearchingArgs _args, Side _initialPerspective, ScoredMove _rootMove, Side _curPerspective, float _alpha, float _beta, int _ply)
+    private ScoredMove FindBestMove(int _numPlies, boolean _shouldUseAlphaBetaPruning,
+    boolean _shouldUseHeuristicMoveOrdering, MutableInt _numPositionsEvaluatedReciever,
+    ScoredMove _rootMove, Side _curPerspective, float _alpha, float _beta, int _ply)
     {
-        if (board.isDraw()) return new ScoredMove(_rootMove.getMove(), 0f);
+        //#region Exit conditions
+        if (board.isDraw())
+            return new ScoredMove(_rootMove.getMove(), 0f);
 
         if (board.isMated())
         {
@@ -644,185 +315,65 @@ public class ChessEngine
             if (board.squareAttackedBy(_whiteKingLocation, Side.BLACK) != 0L)
                 return new ScoredMove(_rootMove.getMove(), -Float.MAX_VALUE);
 
+            // if white king is not attacked, black king must be mated
             else return new ScoredMove(_rootMove.getMove(), Float.MAX_VALUE);
         }
 
-        if (_ply >= _args.getNumPlies())
+        if (_ply > _numPlies)
         {
-            return new ScoredMove
-            (
-                _args.getNumPlies() == 0 ? new Move(Square.NONE, Square.NONE)
-                : _rootMove.getMove(),
-                Evaluate()
-            );
+            if (_numPositionsEvaluatedReciever != null)
+                _numPositionsEvaluatedReciever.increment();
+
+            return new ScoredMove(_rootMove.getMove(), Evaluate(false));
         }
+        //#endregion
 
         List<Move> _sortedLegalMoves = board.legalMoves();
 
-        if (_args.isShouldUseHeuristicMoveOrdering()) SortMovesHeuristically(_sortedLegalMoves);
+        if (_shouldUseHeuristicMoveOrdering) SortMovesHeuristically(_sortedLegalMoves, false);
 
         ScoredMove _bestMoveForSide = null;
         for (Move _curMove : _sortedLegalMoves)
         {
             board.doMove(_curMove);
 
-            ScoredMove _scoredMove = FindBestMove
+            ScoredMove _curMoveScored = FindBestMove
             (
-                _args, _initialPerspective, _rootMove,
-                _curPerspective.flip(), _alpha, _beta, _ply + 1
+                _numPlies, _shouldUseAlphaBetaPruning, _shouldUseHeuristicMoveOrdering,
+                _numPositionsEvaluatedReciever, _rootMove, _curPerspective.flip(),
+                _alpha, _beta, _ply + 1
             );
 
             board.undoMove();
 
             if (_bestMoveForSide == null)
-                _bestMoveForSide = _scoredMove;
+                _bestMoveForSide = new ScoredMove(_curMove, _curMoveScored.getScore());
 
             else if (_curPerspective == Side.WHITE)
             {
-                if (_scoredMove.getScore() > _bestMoveForSide.getScore())
-                    _bestMoveForSide = _scoredMove;
+                if (_curMoveScored.getScore() > _bestMoveForSide.getScore())
+                    _bestMoveForSide = new ScoredMove(_curMove, _curMoveScored.getScore());
+                
+                if (_shouldUseAlphaBetaPruning && _bestMoveForSide.getScore() >= _beta) break;
 
                 _alpha = Math.max(_alpha, _bestMoveForSide.getScore());
             }
 
             else
             {
-                if (_scoredMove.getScore() < _bestMoveForSide.getScore())
-                    _bestMoveForSide = _scoredMove;
-
+                if (_curMoveScored.getScore() < _bestMoveForSide.getScore())
+                    _bestMoveForSide = new ScoredMove(_curMove, _curMoveScored.getScore());
+                    
+                if (_shouldUseAlphaBetaPruning && _bestMoveForSide.getScore() <= _alpha)
+                    break;
+                
                 _beta = Math.min(_beta, _bestMoveForSide.getScore());
             }
-
-            if (_args.isShouldUseAlphaBetaPruning() && _alpha >= _beta)
-                break;
         }
 
-        if (_initialPerspective == Side.WHITE)
-        {
-            if (_bestMoveForSide.getScore() > _rootMove.getScore())
-                _rootMove = 
-                new ScoredMove
-                (
-                    _rootMove.getMove(),
-                    _bestMoveForSide.getScore()
-                );
-        }
-
-        else
-        {
-            if (_bestMoveForSide.getScore() < _rootMove.getScore())
-                _rootMove = 
-                new ScoredMove
-                (
-                    _rootMove.getMove(),
-                    _bestMoveForSide.getScore()
-                );
-        }
+        _rootMove = new ScoredMove(_rootMove.getMove(),  _bestMoveForSide.getScore());
 
         return _bestMoveForSide;
-    }
-
-    // TODO: fix this method (returns correct score, but it doesn't return the actual line)
-    private ScoredLine FindBestLine(Side _initialPerspective, Side _curPerspective,
-    int _maxDepth, int _depth, ScoredLine _curLine)
-    {
-        if (board.isDraw())
-        {
-            _curLine = new ScoredLine(_curLine.getLine(), 0f);
-            return _curLine;
-        }
-
-        if (board.isMated())
-        {
-            Square _whiteKingLocation = board.getKingSquare(Side.WHITE);
-
-            // white is mated
-            if (board.squareAttackedBy(_whiteKingLocation, Side.BLACK) != 0L)
-            {
-                _curLine = new ScoredLine(_curLine.getLine(), -Float.MAX_VALUE);
-                return _curLine;
-            }
-
-            // black is mated
-            else
-            {
-                _curLine = new ScoredLine(_curLine.getLine(), Float.MAX_VALUE);
-                return _curLine;
-            }
-        }
-
-        if (_depth == _maxDepth)
-        {
-            if (_curLine == null)
-            {
-                throw new IllegalArgumentException("Max depth cannot be zero.");
-            }
-
-            return new ScoredLine(_curLine.getLine(), Evaluate());
-        }
-        
-
-        ScoredLine _bestLineForSide = null;
-        List<ScoredLine> _equalLines = new ArrayList<>(0);
-        for (Move _curMove : board.legalMoves())
-        {
-            board.doMove(_curMove);
-
-            if (_curLine == null) _curLine = new ScoredLine(new ArrayList<>(), 0f);
-
-            List<Move> _newLine = _curLine.getLine();
-            _newLine.add(_curMove);
-
-            _curLine = new ScoredLine(_newLine, _curLine.getScore());
-
-            ScoredLine _scoredLine = FindBestLine
-            (
-                _initialPerspective, _curPerspective.flip(),
-                _maxDepth, _depth + 1, _curLine
-            );
-
-            board.undoMove();
-
-            if (_bestLineForSide == null)
-            {
-                _bestLineForSide = _scoredLine;
-                _equalLines.add(_scoredLine);
-            }
-
-            if (_scoredLine.getScore() + SCORE_TOLERANCE > _bestLineForSide.getScore()
-                && _scoredLine.getScore() - SCORE_TOLERANCE < _bestLineForSide.getScore())
-            {
-                _equalLines.add(_scoredLine);
-            }
-
-            else if (_curPerspective == Side.WHITE)
-            {
-                if (_scoredLine.getScore() > _bestLineForSide.getScore())
-                {
-                    _bestLineForSide = _scoredLine;
-                    _equalLines.clear();
-                    _equalLines.add(_scoredLine);
-                }
-            }
-
-            else
-            {
-                if (_scoredLine.getScore() < _bestLineForSide.getScore())
-                {
-                    _bestLineForSide = _scoredLine;
-                    _equalLines.clear();
-                    _equalLines.add(_scoredLine);
-                }
-            }
-        }
-
-        if (_equalLines.size() > 1)
-        {
-            int _randIndex = new Random().nextInt(_equalLines.size());
-            return _equalLines.get(_randIndex);
-        }
-        
-        return _bestLineForSide;
     }
     //#endregion
 
@@ -832,7 +383,7 @@ public class ChessEngine
      * @return the evaluation of the position. A negative number indicates a position
      * that favors the black side, while a positive number indicates a position that favors the white side.
      */
-    public float Evaluate()
+    public float Evaluate(boolean _debug)
     {
         List<Square> _whitePawnLocations = board.getPieceLocation(Piece.WHITE_PAWN);
         List<Square> _whiteKnightLocations = board.getPieceLocation(Piece.WHITE_KNIGHT);
@@ -842,19 +393,6 @@ public class ChessEngine
         Square _whiteKingLocation = board.getFistPieceLocation(Piece.WHITE_KING);
         boolean _isThereWhiteQueen = _whiteQueenLocation != Square.NONE;
 
-        float _whiteMaterial = EvaluateMaterial
-        (
-            _whitePawnLocations.size(), _whiteKnightLocations.size(),
-            _whiteBishopLocations.size(), _whiteRookLocations.size(),
-            _isThereWhiteQueen ? 1 : 0
-        );
-
-        float _whitePosition = EvaluatePosition
-        (
-            _whitePawnLocations, _whiteKnightLocations, _whiteBishopLocations,
-            _whiteRookLocations, _whiteQueenLocation, _whiteKingLocation
-        );
-
         List<Square> _blackPawnLocations = board.getPieceLocation(Piece.BLACK_PAWN);
         List<Square> _blackKnightLocations = board.getPieceLocation(Piece.BLACK_KNIGHT);
         List<Square> _blackBishopLocations = board.getPieceLocation(Piece.BLACK_BISHOP);
@@ -863,6 +401,21 @@ public class ChessEngine
         Square _blackKingLocation = board.getFistPieceLocation(Piece.BLACK_KING);
         boolean _isThereBlackQueen = _blackQueenLocation != Square.NONE;
 
+        final float _ENDGAME_WEIGHT = CalculateEndgameWeight
+        (
+            _whitePawnLocations, _whiteKnightLocations, _whiteBishopLocations,
+            _whiteRookLocations, _whiteQueenLocation, _whiteKingLocation,
+            _blackPawnLocations, _blackKnightLocations, _blackBishopLocations,
+            _blackRookLocations, _blackQueenLocation, _blackKingLocation
+        );
+
+        float _whiteMaterial = EvaluateMaterial
+        (
+            _whitePawnLocations.size(), _whiteKnightLocations.size(),
+            _whiteBishopLocations.size(), _whiteRookLocations.size(),
+            _isThereWhiteQueen ? 1 : 0
+        );
+
         float _blackMaterial = EvaluateMaterial
         (
             _blackPawnLocations.size(), _blackKnightLocations.size(),
@@ -870,23 +423,39 @@ public class ChessEngine
             _isThereBlackQueen ? 1 : 0
         );
 
+        float _whitePosition = EvaluatePosition
+        (
+            Side.WHITE, _ENDGAME_WEIGHT, _whitePawnLocations, _whiteKnightLocations,
+            _whiteBishopLocations, _whiteRookLocations, _whiteQueenLocation,
+            _whiteKingLocation
+        );
+
+
         float _blackPosition = EvaluatePosition
         (
-            _blackPawnLocations, _blackKnightLocations, _blackBishopLocations,
+            Side.BLACK, _ENDGAME_WEIGHT, _blackPawnLocations, _blackKnightLocations, _blackBishopLocations,
             _blackRookLocations, _blackQueenLocation, _blackKingLocation
         );
 
-        // System.out.println();
-        // System.out.println("White position, material: " + _whitePosition + ", " + _whiteMaterial);
-        // System.out.println("Black position: " + _blackPosition + ", " + _blackMaterial);
-        // System.out.println();
-        // _whitePosition = 0f;
-        // _blackPosition = 0f;
+        if (_debug)
+        {
+            System.out.println("White mat: " + _whiteMaterial);
+            System.out.println("Black mat: " + _blackMaterial);
+            System.out.println("White pos: " + _whitePosition);
+            System.out.println("Black pos: " + _blackPosition);
+        }
 
+        // not plus because internal functions
+        // do not consider what side they are evaluating for
         return (_whiteMaterial + _whitePosition) - (_blackMaterial + _blackPosition);
     }
 
     /**
+     * <STRONG>IMPORTANT NOTE:</STRONG> A negative number does not mean
+     * an evaluation that favors black and a positive number does
+     * not mean an evaluation favors white necessarily.
+     * That is applied in the "Evaluate" function.
+     * <p>
      * Evaluates the material value of pawns and pieces.
      * This function does not accept a board and a side to evaluate
      * to optimize the "Evaluate" function. The number of pawns and pieces should
@@ -896,8 +465,7 @@ public class ChessEngine
      * @param _numBishops the number of bishops for a side. Should be 2 to 0.
      * @param _numRooks the number of rooks for a side. Should be 2 to 0.
      * @param _queenNum the number of queens. Should be 1 or 0.
-     * @return the counted-up material. A negative number indicates a position
-     * that favors the black side, while a positive number indicates a position that favors the white side.
+     * @return the counted-up material. A more positive number indicates a better material count.
      */
     private float EvaluateMaterial(int _numPawns, int _numKnights, int _numBishops,
     int _numRooks, int _queenNum)
@@ -909,6 +477,11 @@ public class ChessEngine
     }
 
     /**
+     * <STRONG>IMPORTANT NOTE:</STRONG> A negative number does not mean
+     * an evaluation that favors black and a positive number does
+     * not mean an evaluation favors white necessarily.
+     * That is applied in the "Evaluate" function.
+     * <p>
      * Evaluates the positional aspect of a Chess board by calling functions such as
      * "EvaluatePiecePlacement", "EvaluatePawnStructure", and more internally.
      * The function takes in the pawn and piece location parameters to optimize
@@ -923,16 +496,16 @@ public class ChessEngine
      * @param _rookLocations the locations of every rook of a side
      * @param _queenLocation the location of the queen of a side
      * @param _kingLocation the locations of every pawn of a side
-     * @return the evaluation of the board for a side based on its positional aspects. A negative number indicates a position
-     * that favors the black side, while a positive number indicates a position that favors the white side.
+     * @return the evaluation of the board for a side based on its positional aspects.
+     * A more positive number indicates that the position is better for the side being evaluated.
      */
-    private float EvaluatePosition(List<Square> _pawnLocations,
-    List<Square> _knightLocations, List<Square> _bishopLocations,
+    private float EvaluatePosition(Side _perspective, float _endgameWeight,
+    List<Square> _pawnLocations, List<Square> _knightLocations, List<Square> _bishopLocations,
     List<Square> _rookLocations, Square _queenLocation, Square _kingLocation)
     {
         return EvaluatePiecePlacement
         (
-            _pawnLocations, _knightLocations,
+            _perspective, _endgameWeight, _pawnLocations, _knightLocations,
             _bishopLocations, _rookLocations, _queenLocation, _kingLocation
         )
         + EvaluatePieceMobility
@@ -943,12 +516,215 @@ public class ChessEngine
         + EvaluatePawnStructure(_pawnLocations) + EvaluateKingSafety(_kingLocation);
     }
 
-    // TODO
-    private static float EvaluatePiecePlacement(List<Square> _pawnLocations,
-    List<Square> _knightLocations, List<Square> _bishopLocations,
+    /**
+     * Calculates the endgame weight according to the engine's Chess board
+     * for use in other functions.
+     * @param _pawnLocations
+     * @param _knightLocations
+     * @param _bishopLocations
+     * @param _rookLocations
+     * @param _queenLocation
+     * @param _kingLocation
+     * @param _enemyPawnLocations
+     * @param _enemyKnightLocations
+     * @param _enemyBishopLocations
+     * @param _enemyRookLocations
+     * @param _enemyQueenLocation
+     * @param _enemyKingLocation
+     * @return the endgame weight, a float between 0 and 1 that indicates
+     * how close the game is to the endgame. Numbers closer to 1 are near the endgame,
+     * while numbers closer to 0 are nearer to the opening or middle game.
+     * The endgame weight is calculated based on the number of pieces on the board,
+     * excluding the kings.
+     */
+    private float CalculateEndgameWeight(List<Square> _pawnLocations, List<Square> _knightLocations,
+    List<Square> _bishopLocations, List<Square> _rookLocations, Square _queenLocation,
+    Square _kingLocation, List<Square> _enemyPawnLocations, List<Square> _enemyKnightLocations,
+    List<Square> _enemyBishopLocations, List<Square> _enemyRookLocations, Square _enemyQueenLocation,
+    Square _enemyKingLocation)
+    {
+        // if all pawns & pieces are present, endgame weight is 0
+
+        // at most, 16
+        int _numPawns = _pawnLocations.size() + _enemyPawnLocations.size();
+        // at most, 8
+        int _numMinorPieces = _knightLocations.size() + _bishopLocations.size()
+        + _enemyKnightLocations.size() + _enemyBishopLocations.size();
+        // at most, 4
+        int _numRooks = _rookLocations.size() + _enemyRookLocations.size();
+        // at most, 2
+        int _numQueens = (_queenLocation == Square.NONE ? 0 : 1)
+        + (_enemyQueenLocation == Square.NONE ? 0 : 1);
+
+        float _endgameWeight = 1f;
+
+        // dividing by max result to "normalize" the subtraction
+        // and keep it in the range 0 to 1
+        _endgameWeight -= ((_numPawns * PAWN_VALUE) / 2 + _numMinorPieces * BISHOP_VALUE
+        + _numRooks * ROOK_VALUE * 1.095 + _numQueens * QUEEN_VALUE * 1.2) / (8 * PAWN_VALUE + 8 * BISHOP_VALUE
+        + 4 * ROOK_VALUE * 1.095 + 2 * QUEEN_VALUE * 1.2);
+
+        return _endgameWeight;
+    }
+
+    /**
+     * <STRONG>IMPORTANT NOTE:</STRONG> A negative number does not mean
+     * an evaluation that favors black and a positive number does
+     * not mean an evaluation favors white necessarily.
+     * That is applied in the "Evaluate" function.
+     * <p>
+     * Evaluates the placement of each piece based on the private
+     * piece square tables in the engine. All given pawn and piece locations should be from the same
+     * side and board.
+     * @param _perspective the side whose pieces are being evaluated
+     * @param _endgameWeight a float from 0-1 representing how close the game is to the endgame.
+     * A value closer to 1 represents a game closer to the endgame.
+     * @param _pawnLocations the squares of each pawn
+     * @param _knightLocations the squares of each knight
+     * @param _bishopLocations the squares of each bishop
+     * @param _rookLocations the squares of each rook
+     * @param _queenLocation the square of the queen
+     * @param _kingLocation the square of the king
+     * @return the evaluation of the piece locations. A negative value indicates bad piece placement,
+     * while a positive value means the opposite.
+     */
+    private float EvaluatePiecePlacement(Side _perspective, float _endgameWeight,
+    List<Square> _pawnLocations, List<Square> _knightLocations, List<Square> _bishopLocations,
     List<Square> _rookLocations, Square _queenLocation, Square _kingLocation)
     {
-        return 0f;
+        if (_perspective.equals(Side.WHITE))
+        {
+            float _piecePlacementEvaluation = 0f;
+
+            for (Square _pawnLocation : _pawnLocations)
+            {
+                int _row = 7 - _pawnLocation.getRank().ordinal();
+                int _column = _pawnLocation.getFile().ordinal();
+
+                _piecePlacementEvaluation += Lerp
+                (
+                    PAWN_PLACEMENT_TABLE_MIDDLEGAME[_row][_column],
+                    PAWN_PLACEMENT_TABLE_ENDGAME[_row][_column], _endgameWeight
+                );
+            }
+
+            for (Square _knightLocation : _knightLocations)
+            {
+                int _row = 7 - _knightLocation.getRank().ordinal();
+                int _column = _knightLocation.getFile().ordinal();
+
+                _piecePlacementEvaluation += KNIGHT_PLACEMENT_TABLE[_row][_column];
+            }
+
+            for (Square _bishopLocation : _bishopLocations)
+            {
+                int _row = 7 - _bishopLocation.getRank().ordinal();
+                int _column = _bishopLocation.getFile().ordinal();
+
+                _piecePlacementEvaluation += BISHOP_PLACEMENT_TABLE[_row][_column];
+            }
+
+            for (Square _rookLocation : _rookLocations)
+            {
+                int _row = 7 - _rookLocation.getRank().ordinal();
+                int _column = _rookLocation.getFile().ordinal();
+
+                _piecePlacementEvaluation += ROOK_PLACEMENT_TABLE[_row][_column];
+            }
+
+            if (!_queenLocation.equals(Square.NONE))
+            {
+                int _queenRow = 7 - _queenLocation.getRank().ordinal();
+                int _queenColumn = _queenLocation.getFile().ordinal();
+
+                _piecePlacementEvaluation += QUEEN_PLACEMENT_TABLE[_queenRow][_queenColumn];
+            }
+
+            int _kingRow = 7 - _kingLocation.getRank().ordinal();
+            int _kingColumn = _kingLocation.getFile().ordinal();
+
+            // doing this if it is most likely the endgame instead of lerping
+            // because of how strong the punishments are for being in center
+            // in the king middlegame table
+            if (_endgameWeight > 0.7) _piecePlacementEvaluation +=
+            KING_PLACEMENT_TABLE_ENDGAME[_kingRow][_kingColumn];
+
+            else _piecePlacementEvaluation +=
+            Lerp
+            (
+                KING_PLACEMENT_TABLE_MIDDLEGAME[_kingRow][_kingColumn],
+                KING_PLACEMENT_TABLE_ENDGAME[_kingRow][_kingColumn], _endgameWeight
+            );
+
+            return _piecePlacementEvaluation;
+        }
+
+        else
+        {
+            float _piecePlacementEvaluation = 0f;
+
+            for (Square _pawnLocation : _pawnLocations)
+            {
+                int _row = _pawnLocation.getRank().ordinal();
+                int _column = 7 - _pawnLocation.getFile().ordinal();
+
+                _piecePlacementEvaluation += Lerp
+                (
+                    PAWN_PLACEMENT_TABLE_MIDDLEGAME[_row][_column],
+                    PAWN_PLACEMENT_TABLE_ENDGAME[_row][_column], _endgameWeight
+                );
+            }
+
+            for (Square _knightLocation : _knightLocations)
+            {
+                int _row = _knightLocation.getRank().ordinal();
+                int _column = 7 - _knightLocation.getFile().ordinal();
+
+                _piecePlacementEvaluation += KNIGHT_PLACEMENT_TABLE[_row][_column];
+            }
+
+            for (Square _bishopLocation : _bishopLocations)
+            {
+                int _row = _bishopLocation.getRank().ordinal();
+                int _column = 7 - _bishopLocation.getFile().ordinal();
+
+                _piecePlacementEvaluation += BISHOP_PLACEMENT_TABLE[_row][_column];
+            }
+
+            for (Square _rookLocation : _rookLocations)
+            {
+                int _row = _rookLocation.getRank().ordinal();
+                int _column = 7 - _rookLocation.getFile().ordinal();
+
+                _piecePlacementEvaluation += ROOK_PLACEMENT_TABLE[_row][_column];
+            }
+
+            if (!_queenLocation.equals(Square.NONE))
+            {
+                int _queenRow = _queenLocation.getRank().ordinal();
+                int _queenColumn = 7 - _queenLocation.getFile().ordinal();
+    
+                _piecePlacementEvaluation += QUEEN_PLACEMENT_TABLE[_queenRow][_queenColumn];
+            }
+
+            int _kingRow = _kingLocation.getRank().ordinal();
+            int _kingColumn = 7 - _kingLocation.getFile().ordinal();
+
+            // doing this if it is most likely the endgame instead of lerping
+            // because of how strong the punishments are for being in center
+            // in the king middlegame table
+            if (_endgameWeight > 0.7) _piecePlacementEvaluation +=
+            KING_PLACEMENT_TABLE_ENDGAME[_kingRow][_kingColumn];
+
+            else  _piecePlacementEvaluation +=
+            Lerp
+            (
+                KING_PLACEMENT_TABLE_MIDDLEGAME[_kingRow][_kingColumn],
+                KING_PLACEMENT_TABLE_ENDGAME[_kingRow][_kingColumn], _endgameWeight
+            );
+
+            return _piecePlacementEvaluation;
+        }
     }
 
     // TODO
@@ -959,13 +735,18 @@ public class ChessEngine
     }
 
     /**
+     * <STRONG>IMPORTANT NOTE:</STRONG> A negative number does not mean
+     * an evaluation that favors black and a positive number does
+     * not mean an evaluation favors white necessarily.
+     * That is applied in the "Evaluate" function.
+     * <p>
      * Evaluates the pawn structure of a side.
      * <p>
      * The pawn locations should be counted from the same side, position, and board.
      * The function takes in the pawn locations to optimize the "Evaluation" function.
      * @param _pawnLocations the locations of every pawn of a side
-     * @return the evaluation of the pawn structure of a side. A negative number indicates a position
-     * that favors the black side, while a positive number indicates a position that favors the white side.
+     * @return the evaluation of the pawn structure of a side.
+     * A more positive number means that the pawn structure is better for the side being evaluted.
      */
     private float EvaluatePawnStructure(List<Square> _pawnLocations)
     {
@@ -1013,6 +794,7 @@ public class ChessEngine
     }
 
     // TODO
+    // this function should take into account the endgame weight
     private float EvaluateKingSafety(Square _kingLocation)
     {
         return 0f;
@@ -1026,7 +808,7 @@ public class ChessEngine
      * This function assumes that all moves given are legal.
      * @param _movesToOrder the moves to order
      */
-    private void SortMovesHeuristically(List<Move> _movesToOrder)
+    private void SortMovesHeuristically(List<Move> _movesToOrder, boolean _shouldDebug)
     {
         List<ScoredMove> _movesToOrderScored = new ArrayList<>();
         
@@ -1036,17 +818,8 @@ public class ChessEngine
             Piece _movingPiece = board.getPiece(_moveToOrder.getFrom());
             Piece _attackedPiece = board.getPiece(_moveToOrder.getTo());
 
-            if (_attackedPiece != Piece.NONE)
-            {
-                // bonus for lower-valued piece taking higher valued piece
-                if (GetPieceValue(_movingPiece) < GetPieceValue(_attackedPiece))
-                {
-                    _moveEvaluationGuess += GetPieceValue(_attackedPiece) - GetPieceValue(_movingPiece);
-                }
-            }
-
             // if the other side attacks the to square
-            if (board.squareAttackedBy(_moveToOrder.getTo(), board.getSideToMove().flip()) != 0L)
+            if (board.squareAttackedBy(_moveToOrder.getTo(), _movingPiece.getPieceSide().flip()) != 0L)
             {
                 // penalty if the piece's side doesn't defend the to square
                 if (board.squareAttackedBy(_moveToOrder.getTo(), _movingPiece.getPieceSide()) == 0L)
@@ -1054,30 +827,41 @@ public class ChessEngine
                     _moveEvaluationGuess -= GetPieceValue(_movingPiece);
                 }
 
-                else
+                // bonus for lower-valued piece taking higher valued piece
+                // no penalty though
+                if (_attackedPiece != Piece.NONE
+                    && GetPieceValue(_movingPiece) < GetPieceValue(_attackedPiece))
                 {
-                    // penalty if a lower-valued piece attacks the to square
-                    board.setSideToMove(board.getSideToMove().flip());
-                    float _minAttackingOpponentPieceValue = 0f;
-                    for (Move _legalMove : board.legalMoves())
+                    _moveEvaluationGuess += GetPieceValue(_attackedPiece) - GetPieceValue(_movingPiece);
+                }
+            }
+
+            // enemy doesn't attack square
+            else
+            {
+                // bonus for promoting
+                if (_movingPiece.getPieceType().equals(PieceType.PAWN))
+                {
+                    if (_movingPiece.getPieceSide().equals(Side.WHITE))
                     {
-                        if (_legalMove.getTo().equals(_moveToOrder.getTo()))
+                        if (_moveToOrder.getTo().getRank().equals(Rank.RANK_8))
                         {
-                            _minAttackingOpponentPieceValue = Math.min
-                            (
-                                GetPieceValue(board.getPiece(_legalMove.getFrom())),
-                                _minAttackingOpponentPieceValue
-                            );
+                            _moveEvaluationGuess += QUEEN_VALUE;
                         }
                     }
-                    board.setSideToMove(board.getSideToMove().flip());
-    
-                    if (_minAttackingOpponentPieceValue < GetPieceValue(_movingPiece))
+
+                    else
                     {
-                        _moveEvaluationGuess += _minAttackingOpponentPieceValue - GetPieceValue(_movingPiece);
+                        if (_moveToOrder.getTo().getRank().equals(Rank.RANK_1))
+                        {
+                            _moveEvaluationGuess += QUEEN_VALUE;
+                        }
                     }
                 }
 
+                // bonus for taking free piece
+                if (_attackedPiece != Piece.NONE)
+                    _moveEvaluationGuess += GetPieceValue(_attackedPiece);
             }
 
             // bonus for giving check
@@ -1092,6 +876,11 @@ public class ChessEngine
         }
 
         // sorting _movesToOrder based on _movesToOrderScored
+
+        // should find a better way to sort
+        // 1 N*log(N) sort and 2 N operations
+        // One N operation is clearing
+        // the other is adding to _movesToOrder list
         
         Collections.sort(_movesToOrderScored);
 
@@ -1099,6 +888,13 @@ public class ChessEngine
         for (ScoredMove _moveToOrderScored : _movesToOrderScored)
         {
             _movesToOrder.add(_moveToOrderScored.getMove());
+        }
+
+        if (_shouldDebug)
+        {
+            System.out.println(_movesToOrderScored);
+    
+            System.out.println();
         }
     }
 
@@ -1131,53 +927,10 @@ public class ChessEngine
                 return 0f;
         }
     }
-    //#endregion
-
-    @Data
-    private class RecursiveMoveSearchingParameters
+    
+    private float Lerp(float _valOne, float _valTwo, float _time)
     {
-        private ScoredMove rootMove;
-        private Side initialPerspective;
-        private Side curPerspective;
-        private int depth;
-        private float alpha;
-        private float beta;
-
-        
-
-        public RecursiveMoveSearchingParameters(ScoredMove _rootMove, Side _initialPerspective,
-        Side _curPerspective, int _depth)
-        {
-            rootMove = _rootMove;
-            initialPerspective = _initialPerspective;
-            curPerspective = _curPerspective;
-            depth = _depth;
-
-            alpha = -Float.MAX_VALUE;
-            beta = Float.MAX_VALUE;
-        }
-
-        public RecursiveMoveSearchingParameters(RecursiveMoveSearchingParameters _paramsToCopy)
-        {
-            this
-            (
-                new ScoredMove(_paramsToCopy.rootMove.getMove(), _paramsToCopy.rootMove.getScore()),
-                Side.valueOf(_paramsToCopy.initialPerspective.toString()),
-                _paramsToCopy.curPerspective, _paramsToCopy.depth
-            );
-
-            alpha = _paramsToCopy.alpha;
-            beta = _paramsToCopy.beta;
-        }
-
-        public void ResetAlpha()
-        {
-            alpha = -Float.MAX_VALUE;
-        }
-
-        public void ResetBeta()
-        {
-            beta = Float.MAX_VALUE;
-        }
+        return _valOne + _time * (_valTwo - _valOne);
     }
+    //#endregion
 }
