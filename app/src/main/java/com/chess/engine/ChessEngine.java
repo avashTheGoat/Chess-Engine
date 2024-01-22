@@ -15,6 +15,7 @@ import com.github.bhlangonijr.chesslib.Rank;
 import com.github.bhlangonijr.chesslib.Side;
 import com.github.bhlangonijr.chesslib.Square;
 import com.github.bhlangonijr.chesslib.move.Move;
+import com.github.bhlangonijr.chesslib.move.MoveGenerator;
 
 import lombok.Getter;
 import lombok.Setter;
@@ -35,8 +36,8 @@ public class ChessEngine
 
     //#region Piece values
     private static final float PAWN_VALUE = 1f;
-    private static final float KNIGHT_VALUE = 2.85f;
-    private static final float BISHOP_VALUE = 3f;
+    private static final float KNIGHT_VALUE = 3f;
+    private static final float BISHOP_VALUE = 3.15f;
     private static final float ROOK_VALUE = 5f;
     private static final float QUEEN_VALUE = 10f;
     //#endregion
@@ -50,9 +51,9 @@ public class ChessEngine
     {
         new float[] { QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE, QUEEN_VALUE },
         new float[] { 0.075f, 0.075f, 0.1f, 0.14f, 0.14f, 0.1f, 0.075f, 0.075f },
-        new float[] { 0.02f, 0.045f, 0.11f, 0.155f, 0.155f, 0.11f, 0.045f, 0.02f },
-        new float[] { 0.025f, 0.08f, 0.13f, 0.17f, 0.17f, 0.13f, 0.08f, 0.025f },
-        new float[] { 0.03f, 0.065f, 0.085f, 0.165f, 0.165f, 0.085f, 0.065f, 0.03f },
+        new float[] { 0.02f, 0.045f, 0.11f, 0.15f, 0.15f, 0.11f, 0.045f, 0.02f },
+        new float[] { 0.025f, 0.08f, 0.13f, 0.16f, 0.16f, 0.13f, 0.08f, 0.025f },
+        new float[] { 0.03f, 0.065f, 0.085f, 0.145f, 0.145f, 0.085f, 0.065f, 0.03f },
         new float[] { 0.035f, 0f, 0.035f, 0.035f, 0.035f, 0f, 0f, 0.035f },
         new float[] { 0.085f, 0.085f, 0.085f, -0.1f, -0.1f, 0.085f, 0.085f, 0.085f },
         new float[] { -0.175f, -0.175f, -0.175f, -0.175f, -0.175f, -0.175f, -0.175f, -0.175f }
@@ -168,17 +169,20 @@ public class ChessEngine
     //#region Searching
     /**
      * Finds the best move for the side to move according to the engine's internal Chess board.
-     * Various optimizations can be turned on and off using the boolean parameters.
+     * This function uses the Negamax algorithm.
+     * Various settings can be turned on and off using the boolean parameters.
      * @param _numPlies the max number of plies to search into
      * @param _shouldUseAlphaBetaPruning a boolean flag that determines if alpha beta pruning is used
      * @param _shouldUseHeuristicMoveOrdering a boolean flag that determines if heuristic move ordering is used
      * @param _numMovesEvaluatedReciever an object to count the number of moves evaluated.
      * If move counting is not required, set this parameter to null.
-     * @return the best move for the side to move in the engine's internal board
+     * @return the best move for the side to move in the engine's internal board.
+     * If the score of the move's score is positive, the position was evaluated as better for white,
+     * but if the move's score is negative, the position is better for black.
      * @throws IllegalArgumentException if _numPlies is less than 0
      */
     public ScoredMove FindBestMove(int _numPlies, boolean _shouldUseAlphaBetaPruning,
-    boolean _shouldUseHeuristicMoveOrdering, MutableInt _numMovesEvaluatedReciever)
+    boolean _shouldUseHeuristicMoveOrdering, boolean _shouldUseQuiescence, MutableInt _numMovesEvaluatedReciever)
     throws IllegalArgumentException
     {
         if (board.isDraw())
@@ -206,11 +210,10 @@ public class ChessEngine
 
         List<Move> _sortedLegalMoves = board.legalMoves();
 
-        if (_shouldUseHeuristicMoveOrdering) SortMovesHeuristically(_sortedLegalMoves, false);
+        if (_shouldUseHeuristicMoveOrdering) SortMovesHeuristically(_sortedLegalMoves, false, false);
 
         ScoredMove _bestMoveForSide = null;
 
-        Side _initialPerspective = board.getSideToMove();
         float _alpha = -Float.MAX_VALUE;
         float _beta = Float.MAX_VALUE;
 
@@ -218,63 +221,45 @@ public class ChessEngine
 
         for (Move _curMove : _sortedLegalMoves)
         {
-            ScoredMove _rootMove = new ScoredMove(_curMove, 0f);
-
             board.doMove(_curMove);
 
-            ScoredMove _opponentBestResponse = FindBestMove
+            float _eval = -FindBestMove
             (
                 _numPlies, _shouldUseAlphaBetaPruning, _shouldUseHeuristicMoveOrdering,
-                _numMovesEvaluatedReciever, _rootMove, _initialPerspective.flip(),
-                _alpha, _beta, 2
+                _shouldUseQuiescence, _numMovesEvaluatedReciever, -_beta, -_alpha, 2
             );
 
             board.undoMove();
 
             if (_bestMoveForSide == null)
             {
-                _bestMoveForSide = new ScoredMove(_curMove, _opponentBestResponse.getScore());
+                _bestMoveForSide = new ScoredMove(_curMove, _eval);
                 _equalMoves.add(_bestMoveForSide);
             }
 
-            if (_opponentBestResponse.getScore() + SCORE_TOLERANCE > _bestMoveForSide.getScore()
-                && _opponentBestResponse.getScore() - SCORE_TOLERANCE < _bestMoveForSide.getScore())
+            else if (_eval + SCORE_TOLERANCE > _bestMoveForSide.getScore()
+                && _eval - SCORE_TOLERANCE < _bestMoveForSide.getScore())
             {
                 _equalMoves.add(_bestMoveForSide);
-            }
-
-            else if (_initialPerspective == Side.WHITE)
-            {
-                if (_opponentBestResponse.getScore() > _bestMoveForSide.getScore())
-                {
-                    _bestMoveForSide = new ScoredMove(_curMove, _opponentBestResponse.getScore());
-                    _equalMoves.clear();
-                    _equalMoves.add(_bestMoveForSide);
-                }
-                
-                if (_shouldUseAlphaBetaPruning && _bestMoveForSide.getScore() >= _beta) break;
-                
-                _alpha = Math.max(_alpha, _bestMoveForSide.getScore());
-                
             }
 
             else
             {
-                if (_opponentBestResponse.getScore() < _bestMoveForSide.getScore())
+                if (_eval > _bestMoveForSide.getScore())
                 {
-                    _bestMoveForSide = new ScoredMove(_curMove, _opponentBestResponse.getScore());
+                    _bestMoveForSide = new ScoredMove(_curMove, _eval);
                     _equalMoves.clear();
                     _equalMoves.add(_bestMoveForSide);
                 }
                 
-                if (_shouldUseAlphaBetaPruning && _bestMoveForSide.getScore() <= _alpha) break;
+                _alpha = Math.max(_alpha, _eval);
                 
-                _beta = Math.min(_beta, _bestMoveForSide.getScore());
+                if (_shouldUseAlphaBetaPruning && _alpha >= _beta) break;
             }
         }
 
         // only with the initial call because this method
-        // only returns the root move, so this won't
+        // only returns the root move, not the line, so this won't
         // affect the outcome for other depths
         if (_equalMoves.size() > 1)
         {
@@ -283,6 +268,14 @@ public class ChessEngine
         }
 
         // System.out.println(_equalMoves);
+
+        // changing score variable to be negative when
+        // black is better, positive when white is better
+        _bestMoveForSide = new ScoredMove
+        (
+            _bestMoveForSide.getMove(),
+            (board.getSideToMove() == Side.WHITE ? 1 : -1) * _bestMoveForSide.getScore()
+        );
 
         return _bestMoveForSide;
     }
@@ -300,23 +293,22 @@ public class ChessEngine
      * @param _ply
      * @return the best move for the side to move, which is determined by the engine's Chess board.
      */
-    private ScoredMove FindBestMove(int _numPlies, boolean _shouldUseAlphaBetaPruning,
-    boolean _shouldUseHeuristicMoveOrdering, MutableInt _numPositionsEvaluatedReciever,
-    ScoredMove _rootMove, Side _curPerspective, float _alpha, float _beta, int _ply)
+    private float FindBestMove(int _numPlies, boolean _shouldUseAlphaBetaPruning,
+    boolean _shouldUseHeuristicMoveOrdering, boolean _shouldUseQuiescence,
+    MutableInt _numPositionsEvaluatedReciever, float _alpha, float _beta, int _ply)
     {
         //#region Exit conditions
-        if (board.isDraw())
-            return new ScoredMove(_rootMove.getMove(), 0f);
+        if (board.isDraw()) return 0f;
 
         if (board.isMated())
         {
             Square _whiteKingLocation = board.getKingSquare(Side.WHITE);
 
             if (board.squareAttackedBy(_whiteKingLocation, Side.BLACK) != 0L)
-                return new ScoredMove(_rootMove.getMove(), -Float.MAX_VALUE);
+                return -Float.MAX_VALUE;
 
             // if white king is not attacked, black king must be mated
-            else return new ScoredMove(_rootMove.getMove(), Float.MAX_VALUE);
+            else return Float.MAX_VALUE;
         }
 
         if (_ply > _numPlies)
@@ -324,64 +316,82 @@ public class ChessEngine
             if (_numPositionsEvaluatedReciever != null)
                 _numPositionsEvaluatedReciever.increment();
 
-            return new ScoredMove(_rootMove.getMove(), Evaluate(false));
+            if (_shouldUseQuiescence)
+                return Quiescence(_alpha, _beta) * (board.getSideToMove() == Side.WHITE ? 1 : -1);
+
+            return Evaluate(false) * (board.getSideToMove() == Side.WHITE ? 1 : -1);
         }
         //#endregion
 
         List<Move> _sortedLegalMoves = board.legalMoves();
 
-        if (_shouldUseHeuristicMoveOrdering) SortMovesHeuristically(_sortedLegalMoves, false);
+        if (_shouldUseHeuristicMoveOrdering) SortMovesHeuristically(_sortedLegalMoves, false, false);
 
-        ScoredMove _bestMoveForSide = null;
         for (Move _curMove : _sortedLegalMoves)
         {
             board.doMove(_curMove);
-
-            ScoredMove _curMoveScored = FindBestMove
+            float _eval = -FindBestMove
             (
                 _numPlies, _shouldUseAlphaBetaPruning, _shouldUseHeuristicMoveOrdering,
-                _numPositionsEvaluatedReciever, _rootMove, _curPerspective.flip(),
-                _alpha, _beta, _ply + 1
+                _shouldUseQuiescence, _numPositionsEvaluatedReciever, -_beta, -_alpha, _ply + 1
             );
-
             board.undoMove();
 
-            if (_bestMoveForSide == null)
-                _bestMoveForSide = new ScoredMove(_curMove, _curMoveScored.getScore());
+            _alpha = Math.max(_alpha, _eval);
 
-            else if (_curPerspective == Side.WHITE)
-            {
-                if (_curMoveScored.getScore() > _bestMoveForSide.getScore())
-                    _bestMoveForSide = new ScoredMove(_curMove, _curMoveScored.getScore());
-                
-                if (_shouldUseAlphaBetaPruning && _bestMoveForSide.getScore() >= _beta) break;
-
-                _alpha = Math.max(_alpha, _bestMoveForSide.getScore());
-            }
-
-            else
-            {
-                if (_curMoveScored.getScore() < _bestMoveForSide.getScore())
-                    _bestMoveForSide = new ScoredMove(_curMove, _curMoveScored.getScore());
-                    
-                if (_shouldUseAlphaBetaPruning && _bestMoveForSide.getScore() <= _alpha)
-                    break;
-                
-                _beta = Math.min(_beta, _bestMoveForSide.getScore());
-            }
+            if (_shouldUseAlphaBetaPruning && _alpha >= _beta) return _beta;
         }
 
-        _rootMove = new ScoredMove(_rootMove.getMove(),  _bestMoveForSide.getScore());
+        return _alpha;
+    }
+    
+    private float Quiescence(float _alpha, float _beta)
+    {
+        float _standPat = Evaluate(false);
+        if (_standPat >= _beta) return _beta;
+        _alpha = Math.max(_alpha, _standPat);
 
-        return _bestMoveForSide;
+        List<Move> _captures = MoveGenerator.generatePseudoLegalCaptures(board);
+        
+        if (_captures.size() == 0) return Evaluate(false) * (board.getSideToMove() == Side.WHITE ? 1 : -1);
+
+        boolean _isQueenSack = false;
+
+        SortMovesHeuristically(_captures, true, false);
+        for (Move _capture : _captures)
+        {
+            board.doMove(_capture);
+            float _eval = -Quiescence(-_beta, -_alpha);
+
+            if (board.getHistory().contains(230580079444886362L))
+            {
+                System.out.println(board.toString());
+                System.out.println("Eval: " + _eval);
+                System.out.println();
+                _isQueenSack = true;
+            }
+            board.undoMove();
+
+            if (_alpha >= _beta)
+            {
+                if (_isQueenSack) System.out.println("Final eval for " + board.getSideToMove().flip() + ": " + _beta);
+                return _beta;
+            }
+
+            _alpha = Math.max(_alpha, _eval);
+        }
+
+        if (_isQueenSack) System.out.println("Final eval: " + _alpha);
+
+        return _alpha;
     }
     //#endregion
 
     //#region Evaluating
     /**
      * Evaluates the position of the engine's Chess board.
-     * @return the evaluation of the position. A negative number indicates a position
-     * that favors the black side, while a positive number indicates a position that favors the white side.
+     * @return the evaluation of the position. A positive number indicates a favorable position for
+     * white, and a negative number is favors black.
      */
     public float Evaluate(boolean _debug)
     {
@@ -445,8 +455,6 @@ public class ChessEngine
             System.out.println("Black pos: " + _blackPosition);
         }
 
-        // not plus because internal functions
-        // do not consider what side they are evaluating for
         return (_whiteMaterial + _whitePosition) - (_blackMaterial + _blackPosition);
     }
 
@@ -731,6 +739,16 @@ public class ChessEngine
     private float EvaluatePieceMobility(List<Square> _knightLocations,
     List<Square> _bishopLocations, List<Square> _rookLocations, Square _queenLocation)
     {
+        // knights should be able to make more than three moves
+        // List<Move> _knightMoves = new ArrayList<>();
+        // MoveGenerator.generateKnightMoves(board, _knightMoves);
+
+        // bishops should be able to make more than 4 moves
+
+        // rooks should be able to make more than x moves
+
+        // queens should be able to make more than x moves
+
         return 0f;
     }
 
@@ -802,18 +820,34 @@ public class ChessEngine
     //#endregion
 
     //#region Other
+    // TODO
+    // make mvv-lva moves first always
     /**
      * Orders the given moves to prioritize moves that were
      * heuristically evaluated as "better" to optimize alpha beta pruning.
-     * This function assumes that all moves given are legal.
+     * <p>
+     * If illegal moves are given and the <code>_isQuiescence</code> flag is true,
+     * the function will additionally remove those moves from the list.
      * @param _movesToOrder the moves to order
      */
-    private void SortMovesHeuristically(List<Move> _movesToOrder, boolean _shouldDebug)
+    private void SortMovesHeuristically(List<Move> _movesToOrder, boolean _isQuiescence, boolean _shouldDebug)
     {
+        if (_shouldDebug)
+        {
+            System.out.println(board.toString());
+            System.out.println();
+        }
+
         List<ScoredMove> _movesToOrderScored = new ArrayList<>();
         
         for (Move _moveToOrder : _movesToOrder)
         {
+            if (_isQuiescence)
+            {
+                if (!board.isMoveLegal(_moveToOrder, false))
+                    continue;
+            }
+
             float _moveEvaluationGuess = 0f;
             Piece _movingPiece = board.getPiece(_moveToOrder.getFrom());
             Piece _attackedPiece = board.getPiece(_moveToOrder.getTo());
@@ -827,8 +861,8 @@ public class ChessEngine
                     _moveEvaluationGuess -= GetPieceValue(_movingPiece);
                 }
 
-                // bonus for lower-valued piece taking higher valued piece
-                // no penalty though
+                // bonus for lower-valued piece taking higher valued piece.
+                // mvv, lva
                 if (_attackedPiece != Piece.NONE
                     && GetPieceValue(_movingPiece) < GetPieceValue(_attackedPiece))
                 {
@@ -882,6 +916,9 @@ public class ChessEngine
         // One N operation is clearing
         // the other is adding to _movesToOrder list
         
+        // maybe remove this and opt for
+        // manually finding best move (O(N^2) worst case, but one of
+        // the first moves likely cause a cutoff)
         Collections.sort(_movesToOrderScored);
 
         _movesToOrder.clear();

@@ -6,29 +6,30 @@ import org.apache.commons.lang3.mutable.MutableInt;
 
 import com.github.bhlangonijr.chesslib.Board;
 import com.github.bhlangonijr.chesslib.Side;
+import com.github.bhlangonijr.chesslib.Square;
 import com.github.bhlangonijr.chesslib.move.Move;
 
 public class App
 {
     public static void main(String[] args)
     {
-        // pawn endgame w/ pawn about to promote
-        // BenchmarkEngine("6k1/5p2/6p1/8/8/8/p5PP/6K1 w - - 0 0", 5, false, true, true, true);
+        BenchmarkEngine("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 4, false, false, true, true, true);
+    
+        // tactical blunder that shouldn't happen with quiescence
+        // BenchmarkEngine("r1bqkb1r/ppp1pppp/8/n2p4/2PPn3/3B1N2/PP2QPPP/RNB1K2R b KQkq - 0 1", 3, false, false, true, true, true);
+        // quiescence doesn't take back knight for some reason
+        // BenchmarkEngine("r1bqkb1r/ppp1pppp/8/3p4/2nPn3/3B1N2/PP2QPPP/RNB1K2R w KQkq - 0 1", 3, false, false, true, true, true);
 
-        // Board _board = new Board();
-        // _board.loadFromFen("3k4/2R5/1Q5K/8/8/8/8/8 w - - 0 1");
-
-        // _board.doMove(new Move("b6b8", Side.WHITE));
-
-        // System.out.println(_board.toString());
+        // PlayGame(Side.WHITE, 3);
     }
     
     private static void BenchmarkEngine(String _fen, int _maxPlies, boolean _shouldRunIntermediatePlies,
     boolean _shouldBenchmarkNoOptimizations, boolean _shouldBencharmkOnlyAlphaBeta,
-    boolean _shouldBencharmkAlphaBetaAndMoveSorting)
+    boolean _shouldBencharmkAlphaBetaAndMoveSorting, boolean _shouldBencharmkAlphaBetaMoveSortingAndQuiescence)
     {
         Board _board = new Board();
         _board.loadFromFen(_fen);
+        System.out.println("Hash of position: " + _board.getZobristKey());
         ChessEngine _engine = new ChessEngine(_board);
 
         double _startTimeNanoseconds;
@@ -39,45 +40,27 @@ public class App
         System.out.println();
 
         System.out.println("Ply 0 (short-sighted evaluation): ");
-        System.out.println(_engine.Evaluate(false));
+        System.out.println(_engine.Evaluate(true));
 
         System.out.println();
+
+        int _startingPly = _shouldRunIntermediatePlies ? 1 : _maxPlies;
         
         if (_shouldBenchmarkNoOptimizations)
         {
-            //#region Without alpha beta pruning
             System.out.println("NO ALPHA-BETA PRUNING");
             System.out.println("_______________________________");
 
             System.out.println();
 
-            if (_shouldRunIntermediatePlies)
-            {
-                for (int _numPlies = 1; _numPlies <= _maxPlies; _numPlies++)
-                {
-                    System.out.println("Ply " + _maxPlies + ": ");
-        
-                    _numPositionsEvaluated = new MutableInt(0);
-            
-                    _startTimeNanoseconds = System.nanoTime();
-                    System.out.println(_engine.FindBestMove(_numPlies, false, false, _numPositionsEvaluated));
-                    _timeTakenSeconds = (System.nanoTime() - _startTimeNanoseconds) / 1000000000;
-                    
-                    System.out.println("Num positions evaluated: " + _numPositionsEvaluated.intValue());
-                    System.out.println("Time taken (seconds): " + _timeTakenSeconds);
-            
-                    System.out.println();
-                }
-            }
-
-            else
+            for (int _numPlies = _startingPly; _numPlies <= _maxPlies; _numPlies++)
             {
                 System.out.println("Ply " + _maxPlies + ": ");
-        
+    
                 _numPositionsEvaluated = new MutableInt(0);
         
                 _startTimeNanoseconds = System.nanoTime();
-                System.out.println(_engine.FindBestMove(_maxPlies, false, false, _numPositionsEvaluated));
+                System.out.println(_engine.FindBestMove(_numPlies, false, false, false, _numPositionsEvaluated));
                 _timeTakenSeconds = (System.nanoTime() - _startTimeNanoseconds) / 1000000000;
                 
                 System.out.println("Num positions evaluated: " + _numPositionsEvaluated.intValue());
@@ -85,7 +68,6 @@ public class App
         
                 System.out.println();
             }
-            //#endregion
 
             System.out.println();
             System.out.println();
@@ -94,40 +76,20 @@ public class App
 
         if (_shouldBencharmkOnlyAlphaBeta)
         {
-            //#region With alpha beta pruning
             System.out.println("ALPHA-BETA PRUNING: ");
             System.out.println("______________________________________");
 
             System.out.println();
 
-            if (_shouldRunIntermediatePlies)
+            for (int _numPlies = _startingPly; _numPlies <= _maxPlies; _numPlies++)
             {
-                for (int _numPlies = 1; _numPlies <= _maxPlies; _numPlies++)
-                {
-                    
-                    System.out.printf("Ply %d: \n", _numPlies);
-        
-                    _numPositionsEvaluated = new MutableInt(0);
-            
-                    _startTimeNanoseconds = System.nanoTime();
-                    System.out.println(_engine.FindBestMove(_numPlies, true, false, _numPositionsEvaluated));
-                    _timeTakenSeconds = (System.nanoTime() - _startTimeNanoseconds) / 1000000000;
-                    
-                    System.out.println("Num positions evaluated: " + _numPositionsEvaluated.intValue());
-                    System.out.println("Time taken (seconds): " + _timeTakenSeconds);
-            
-                    System.out.println();
-                }
-            }
-
-            else
-            {
-                System.out.println("Ply " + _maxPlies + ": ");
-        
+                
+                System.out.printf("Ply %d: \n", _numPlies);
+    
                 _numPositionsEvaluated = new MutableInt(0);
         
                 _startTimeNanoseconds = System.nanoTime();
-                System.out.println(_engine.FindBestMove(_maxPlies, true, false, _numPositionsEvaluated));
+                System.out.println(_engine.FindBestMove(_numPlies, true, false, false, _numPositionsEvaluated));
                 _timeTakenSeconds = (System.nanoTime() - _startTimeNanoseconds) / 1000000000;
                 
                 System.out.println("Num positions evaluated: " + _numPositionsEvaluated.intValue());
@@ -135,7 +97,6 @@ public class App
         
                 System.out.println();
             }
-            //#endregion
             
             System.out.println();
             System.out.println();
@@ -144,40 +105,20 @@ public class App
 
         if (_shouldBencharmkAlphaBetaAndMoveSorting)
         {
-            //#region With alpha beta pruning and move ordering
             System.out.println("ALPHA-BETA PRUNING AND HEURISTIC MOVE ORDERING: ");
             System.out.println("______________________________________");
 
             System.out.println();
 
-            if (_shouldRunIntermediatePlies)
+            for (int _numPlies = _startingPly; _numPlies <= _maxPlies; _numPlies++)
             {
-                for (int _numPlies = 1; _numPlies <= _maxPlies; _numPlies++)
-                {
-                    
-                    System.out.println("Ply " + _maxPlies + ": ");
-        
-                    _numPositionsEvaluated = new MutableInt(0);
-            
-                    _startTimeNanoseconds = System.nanoTime();
-                    System.out.println(_engine.FindBestMove(_numPlies, true, true, _numPositionsEvaluated));
-                    _timeTakenSeconds = (System.nanoTime() - _startTimeNanoseconds) / 1000000000;
-                    
-                    System.out.println("Num positions evaluated: " + _numPositionsEvaluated.intValue());
-                    System.out.println("Time taken (seconds): " + _timeTakenSeconds);
-            
-                    System.out.println();
-                }
-            }
-
-            else
-            {
+                
                 System.out.println("Ply " + _maxPlies + ": ");
-        
+    
                 _numPositionsEvaluated = new MutableInt(0);
         
                 _startTimeNanoseconds = System.nanoTime();
-                System.out.println(_engine.FindBestMove(_maxPlies, true, true, _numPositionsEvaluated));
+                System.out.println(_engine.FindBestMove(_numPlies, true, true, false, _numPositionsEvaluated));
                 _timeTakenSeconds = (System.nanoTime() - _startTimeNanoseconds) / 1000000000;
                 
                 System.out.println("Num positions evaluated: " + _numPositionsEvaluated.intValue());
@@ -185,62 +126,44 @@ public class App
         
                 System.out.println();
             }
-            //#endregion
+
+            System.out.println();
+            System.out.println();
+            System.out.println();
         }
-    }
-
-    private static void PlayGame(Side _playerSide)
-    {
-        Scanner _input = new Scanner(System.in);
-        ChessEngine _engine = new ChessEngine(new Board());
-
-        while (!_engine.getBoard().isDraw() || !_engine.getBoard().isMated())
+    
+        if (_shouldBencharmkAlphaBetaMoveSortingAndQuiescence)
         {
-            if (_playerSide == Side.WHITE)
+            System.out.println("ALPHA-BETA PRUNING, HEURISTIC MOVE ORDERING, AND QUIESCENCE: ");
+            System.out.println("______________________________________");
+
+            System.out.println();
+
+            for (int _numPlies = _startingPly; _numPlies <= _maxPlies; _numPlies++)
             {
-                System.out.println(_engine.getBoard().toString());
-
-                System.out.println("Enter move: ");
-
-                Move _playerMove = new Move(_input.nextLine(), Side.WHITE);
-                _engine.getBoard().doMove(_playerMove);
-
-                Move _engineMove = _engine.FindBestMove
-                (
-                    4, true, true,
-                    null
-                ).getMove();
-                _engine.getBoard().doMove(_engineMove);
-
-                System.out.println("Engine move: " + _engineMove);
-                System.out.println();
-            }
-
-            else
-            {
-                Move _engineMove = _engine.FindBestMove
-                (
-                    4, true, true,
-                    null
-                ).getMove();
-                _engine.getBoard().doMove(_engineMove);
-
-                System.out.println("Engine move: " + _engineMove);
-                System.out.println();
-
-                System.out.println(_engine.getBoard().toString());
-
-                System.out.println();
                 
-                System.out.println("Enter move: ");
-
-                Move _playerMove = new Move(_input.nextLine(), Side.WHITE);
-                _engine.getBoard().doMove(_playerMove);
+                System.out.println("Ply " + _maxPlies + ": ");
+    
+                _numPositionsEvaluated = new MutableInt(0);
+        
+                _startTimeNanoseconds = System.nanoTime();
+                System.out.println(_engine.FindBestMove(_numPlies, true, true, true, _numPositionsEvaluated));
+                _timeTakenSeconds = (System.nanoTime() - _startTimeNanoseconds) / 1000000000;
+                
+                System.out.println("Num positions evaluated: " + _numPositionsEvaluated.intValue());
+                System.out.println("Time taken (seconds): " + _timeTakenSeconds);
+        
+                System.out.println();
             }
         }
     }
 
-    private static void PlayGame(Side _playerSide, String _initialFen)
+    private static void PlayGame(Side _playerSide, int _ply)
+    {
+        PlayGame(_playerSide, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", _ply);
+    }
+
+    private static void PlayGame(Side _playerSide, String _initialFen, int _ply)
     {
         Scanner _input = new Scanner(System.in);
         Board _board = new Board();
@@ -258,39 +181,32 @@ public class App
                     System.out.println("Enter move: ");
     
                     Move _playerMove = new Move(_input.nextLine(), Side.WHITE);
-
                     _engine.getBoard().doMove(_playerMove);
     
-                    ScoredMove _engineMove = _engine.FindBestMove
-                    (
-                        4, true, true,
-                        null
-                    );
+                    ScoredMove _engineMove = _engine.FindBestMove(_ply, true, true, true, null);
 
-                    // if engine (black) is mated
-                    if (_engineMove.getScore() == Float.MAX_VALUE) break;
+                    if (_engineMove.getMove().equals(new Move(Square.NONE, Square.NONE))) break;
+
+                    if (!_engine.getBoard().isMoveLegal(_engineMove.getMove(), true)) break;
 
                     _engine.getBoard().doMove(_engineMove.getMove());
     
-                    System.out.println("Engine move: " + _engineMove);
+                    System.out.println("Engine move: " + _engineMove.getMove());
                     System.out.println();
                 }
 
                 else
                 {
-                    ScoredMove _engineMove = _engine.FindBestMove
-                    (
-                        4, true, true,
-                        null
-                    );
+                    ScoredMove _engineMove = _engine.FindBestMove(_ply, true, true, true, null);
 
                     // if black (white) is mated
                     if (_engineMove.getScore() == -Float.MAX_VALUE) break;
 
                     _engine.getBoard().doMove(_engineMove.getMove());
     
-                    System.out.println("Engine move: " + _engineMove);
-                    System.out.println();
+                    System.out.println("Engine move: " + _engineMove.getMove());
+                    System.out.println("Immediate eval: " + _engine.Evaluate(false));
+                    System.out.println("Hash: " + _engine.getBoard().getZobristKey());
 
                     System.out.println(_engine.getBoard().toString());
     
@@ -310,14 +226,15 @@ public class App
                     Move _playerMove = new Move(_input.nextLine(), Side.WHITE);
                     _engine.getBoard().doMove(_playerMove);
 
-                    Move _engineMove = _engine.FindBestMove
-                    (
-                        4, true, true,
-                        null
-                    ).getMove();
-                    _engine.getBoard().doMove(_engineMove);
+                    ScoredMove _engineMove = _engine.FindBestMove(_ply, true, true, true, null);
+
+                    if (_engineMove.getMove().equals(new Move(Square.NONE, Square.NONE))) break;
+
+                    if (!_engine.getBoard().isMoveLegal(_engineMove.getMove(), true)) break;
+
+                    _engine.getBoard().doMove(_engineMove.getMove());
     
-                    System.out.println("Engine move: " + _engineMove);
+                    System.out.println("Engine move: " + _engineMove.getMove());
                     System.out.println();
     
                     System.out.println(_engine.getBoard().toString());
@@ -327,14 +244,10 @@ public class App
 
                 else
                 {
-                    Move _engineMove = _engine.FindBestMove
-                    (
-                        4, true, true,
-                        null
-                    ).getMove();
-                    _engine.getBoard().doMove(_engineMove);
+                    ScoredMove _engineMove = _engine.FindBestMove(_ply, true, true, true, null);
+                    _engine.getBoard().doMove(_engineMove.getMove());
     
-                    System.out.println("Engine move: " + _engineMove);
+                    System.out.println("Engine move: " + _engineMove.getMove());
                     System.out.println();
     
                     System.out.println(_engine.getBoard().toString());
