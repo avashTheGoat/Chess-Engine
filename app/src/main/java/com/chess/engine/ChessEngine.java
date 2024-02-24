@@ -25,6 +25,7 @@ public class ChessEngine
     @Setter
     @Getter
     private Board board;
+    private Random rand;
 
     private static final float SCORE_TOLERANCE = 0.005f;
 
@@ -164,6 +165,7 @@ public class ChessEngine
     public ChessEngine(Board _board)
     {
         board = _board;
+        rand = new Random();
     }
 
     //#region Searching
@@ -185,6 +187,7 @@ public class ChessEngine
     boolean _shouldUseHeuristicMoveOrdering, boolean _shouldUseQuiescence, MutableInt _numMovesEvaluatedReciever)
     throws IllegalArgumentException
     {
+        //#region Exit conditions
         if (board.isDraw())
             return new ScoredMove(new Move(Square.NONE, Square.NONE), 0f);
 
@@ -195,10 +198,10 @@ public class ChessEngine
             if (board.squareAttackedBy(_whiteKingLocation, Side.BLACK) != 0L)
                 return new ScoredMove(new Move(Square.NONE, Square.NONE), -Float.MAX_VALUE);
 
-            // if white king isn't in check, then the black king must be
             else
                 return new ScoredMove(new Move(Square.NONE, Square.NONE), Float.MAX_VALUE);
         }
+        //#endregion
 
         //#region Argument checking
         if (_numPlies < 0)
@@ -208,18 +211,18 @@ public class ChessEngine
         }
         //#endregion
 
-        List<Move> _sortedLegalMoves = board.legalMoves();
-
-        if (_shouldUseHeuristicMoveOrdering) SortMovesHeuristically(_sortedLegalMoves, false, false);
+        List<Move> _legalMoves = board.legalMoves();
+        if (_shouldUseHeuristicMoveOrdering)
+            SortMovesHeuristically(_legalMoves, false, false);
 
         ScoredMove _bestMoveForSide = null;
 
         float _alpha = -Float.MAX_VALUE;
         float _beta = Float.MAX_VALUE;
 
-        List<ScoredMove> _equalMoves = new ArrayList<>(0);
+        List<ScoredMove> _equalMoves = new ArrayList<>();
 
-        for (Move _curMove : _sortedLegalMoves)
+        for (Move _curMove : _legalMoves)
         {
             board.doMove(_curMove);
 
@@ -261,13 +264,11 @@ public class ChessEngine
         // only with the initial call because this method
         // only returns the root move, not the line, so this won't
         // affect the outcome for other depths
-        if (_equalMoves.size() > 1)
+        if (_equalMoves.size() != 1)
         {
-            int _randIndex = new Random().nextInt(_equalMoves.size());
+            int _randIndex = rand.nextInt(_equalMoves.size());
             _bestMoveForSide = _equalMoves.get(_randIndex);
         }
-
-        // System.out.println(_equalMoves);
 
         // changing score variable to be negative when
         // black is better, positive when white is better
@@ -348,40 +349,31 @@ public class ChessEngine
     private float Quiescence(float _alpha, float _beta)
     {
         float _standPat = Evaluate(false);
-        if (_standPat >= _beta) return _beta;
+        if (_standPat >= _beta)
+            return _beta;
         _alpha = Math.max(_alpha, _standPat);
 
-        List<Move> _captures = MoveGenerator.generatePseudoLegalCaptures(board);
-        
-        if (_captures.size() == 0) return Evaluate(false) * (board.getSideToMove() == Side.WHITE ? 1 : -1);
-
-        boolean _isQueenSack = false;
-
+        List<Move> _captures = MoveGenerator.generatePseudoLegalCaptures(board);        
         SortMovesHeuristically(_captures, true, false);
         for (Move _capture : _captures)
         {
             board.doMove(_capture);
             float _eval = -Quiescence(-_beta, -_alpha);
-
-            if (board.getHistory().contains(230580079444886362L))
-            {
-                System.out.println(board.toString());
-                System.out.println("Eval: " + _eval);
-                System.out.println();
-                _isQueenSack = true;
-            }
             board.undoMove();
 
-            if (_alpha >= _beta)
+            if (board.getHistory().contains(-256698630273948972L))
             {
-                if (_isQueenSack) System.out.println("Final eval for " + board.getSideToMove().flip() + ": " + _beta);
-                return _beta;
+                System.out.println("Evaluation of move " + _capture
+                + " for " + board.getSideToMove() + " is " + _eval);
+                System.out.println("Fen is " + board.getFen());
+                System.out.println();
             }
+
+            if (_alpha >= _beta)
+                return _beta;
 
             _alpha = Math.max(_alpha, _eval);
         }
-
-        if (_isQueenSack) System.out.println("Final eval: " + _alpha);
 
         return _alpha;
     }
@@ -391,7 +383,7 @@ public class ChessEngine
     /**
      * Evaluates the position of the engine's Chess board.
      * @return the evaluation of the position. A positive number indicates a favorable position for
-     * white, and a negative number is favors black.
+     * white, and a negative number favors black.
      */
     public float Evaluate(boolean _debug)
     {
@@ -423,14 +415,14 @@ public class ChessEngine
         (
             _whitePawnLocations.size(), _whiteKnightLocations.size(),
             _whiteBishopLocations.size(), _whiteRookLocations.size(),
-            _isThereWhiteQueen ? 1 : 0
+            _isThereWhiteQueen ? 1 : 0, _debug
         );
 
         float _blackMaterial = EvaluateMaterial
         (
             _blackPawnLocations.size(), _blackKnightLocations.size(),
             _blackBishopLocations.size(), _blackRookLocations.size(),
-            _isThereBlackQueen ? 1 : 0
+            _isThereBlackQueen ? 1 : 0, _debug
         );
 
         float _whitePosition = EvaluatePosition
@@ -475,9 +467,17 @@ public class ChessEngine
      * @param _queenNum the number of queens. Should be 1 or 0.
      * @return the counted-up material. A more positive number indicates a better material count.
      */
-    private float EvaluateMaterial(int _numPawns, int _numKnights, int _numBishops,
-    int _numRooks, int _queenNum)
+    public float EvaluateMaterial(int _numPawns, int _numKnights, int _numBishops,
+    int _numRooks, int _queenNum, boolean _debug)
     {
+        if (_debug)
+        {
+            System.out.println("Num pawns: " + _numPawns);
+            System.out.println("Num knights: " + _numKnights);
+            System.out.println("Num bishops: " + _numBishops);
+            System.out.println("Num rooks: " + _numRooks);
+            System.out.println("Num queens: " + _queenNum);
+        }
         float _totalMaterialValue = PAWN_VALUE * _numPawns + KNIGHT_VALUE * _numKnights
         + BISHOP_VALUE * _numBishops + ROOK_VALUE * _numRooks + QUEEN_VALUE * _queenNum;
 

@@ -13,12 +13,22 @@ public class App
 {
     public static void main(String[] args)
     {
-        BenchmarkEngine("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 4, false, false, true, true, true);
+        // BenchmarkEngine("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 4, false, false, true, true, true);
     
         // tactical blunder that shouldn't happen with quiescence
-        // BenchmarkEngine("r1bqkb1r/ppp1pppp/8/n2p4/2PPn3/3B1N2/PP2QPPP/RNB1K2R b KQkq - 0 1", 3, false, false, true, true, true);
+        BenchmarkEngine("r1bqkb1r/ppp1pppp/8/n2p4/2PPn3/3B1N2/PP2QPPP/RNB1K2R b KQkq - 0 1", 3, false, false, true, true, true);
         // quiescence doesn't take back knight for some reason
         // BenchmarkEngine("r1bqkb1r/ppp1pppp/8/3p4/2nPn3/3B1N2/PP2QPPP/RNB1K2R w KQkq - 0 1", 3, false, false, true, true, true);
+
+        // Board test = new Board();
+        // test.loadFromFen("r1bqkb1r/ppp1pppp/8/8/2pPn3/5N2/PP2QPPP/RNB1K2R w KQkq - 0 1");
+        // System.out.println(test.getZobristKey());
+
+        // ChessEngine _engine = new ChessEngine(new Board());
+        // _engine.getBoard().loadFromFen("r1b1kb1r/ppp1pppp/8/8/2pqQ3/5N2/PP3PPP/RNB1K2R w KQkq - 0 4");
+
+        // System.out.println("Evaluation: " + _engine.Evaluate(true));
+        // System.out.println("Zobrist key: " + _engine.getBoard().getZobristKey());
 
         // PlayGame(Side.WHITE, 3);
     }
