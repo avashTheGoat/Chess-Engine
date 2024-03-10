@@ -29,10 +29,22 @@ public class ChessEngine
 
     private static final float SCORE_TOLERANCE = 0.005f;
 
+    //#region Evaluation Constants
     //#region Pawn structure penalties
     private static final float DOUBLED_PAWN_PENALTY = 0.095f;
     private static final float ISOLATED_PAWN_PENALTY = 0.105f;
-    private static final float DOUBLED_AND_ISOLATED_PENALTY = 0.2f;
+    private static final float DOUBLED_AND_ISOLATED_PENALTY = 0.21f;
+    //#endregion
+
+    //#region Endgame weight calculation
+    // pawns don't count that much to endgame weight
+    // minor pieces have a decent influence on endgame weight
+    // rooks have slightly multiplied difference
+    // both queens on the board moves the game away from endgame by a lot
+    private static final float PAWN_WEIGHT = 0.35f;
+    private static final float MINOR_PIECE_WEIGHT = 1f;
+    private static final float ROOK_WEIGHT = 1.095f;
+    private static final float QUEEN_WEIGHT = 1.3f;
     //#endregion
 
     //#region Piece values
@@ -161,6 +173,11 @@ public class ChessEngine
         new float[] { -0.125f, -0.025f, 0f, 0.045f, 0.045f, 0f, -0.025f, -0.125f }
     };
     //#endregion
+    
+    //#region King safety movement penalty
+    private static final float KING_AS_QUEEN_MOVEMENT_PENALTY = 0.075f;
+    //#endregion
+    //#endregion
 
     public ChessEngine(Board _board)
     {
@@ -184,8 +201,8 @@ public class ChessEngine
      * @throws IllegalArgumentException if _numPlies is less than 0
      */
     public ScoredMove FindBestMove(int _numPlies, boolean _shouldUseAlphaBetaPruning,
-    boolean _shouldUseHeuristicMoveOrdering, boolean _shouldUseQuiescence, MutableInt _numMovesEvaluatedReciever)
-    throws IllegalArgumentException
+    boolean _shouldUseHeuristicMoveOrdering, boolean _shouldUseQuiescence,
+    MutableInt _numMovesEvaluatedReciever) throws IllegalArgumentException
     {
         //#region Exit conditions
         if (board.isDraw())
@@ -328,6 +345,9 @@ public class ChessEngine
 
         if (_shouldUseHeuristicMoveOrdering) SortMovesHeuristically(_sortedLegalMoves, false, false);
 
+        if (board.getHistory().contains(2797811396367972536L))
+            System.out.println(_sortedLegalMoves);
+
         for (Move _curMove : _sortedLegalMoves)
         {
             board.doMove(_curMove);
@@ -346,11 +366,16 @@ public class ChessEngine
         return _alpha;
     }
     
-    private float Quiescence(float _alpha, float _beta)
+    public float Quiescence(float _alpha, float _beta)
     {
-        float _standPat = Evaluate(false);
+        float _standPat = Evaluate(false) * (board.getSideToMove() == Side.WHITE ? 1 : -1);
+
         if (_standPat >= _beta)
-            return _beta;
+        {
+            if (board.getHistory().contains(8350203091080959822L))
+                System.out.println("Doing a cutoff. Stand pat of " + board.getFen() + " is " + _standPat);
+            return _standPat;
+        }
         _alpha = Math.max(_alpha, _standPat);
 
         List<Move> _captures = MoveGenerator.generatePseudoLegalCaptures(board);        
@@ -361,16 +386,15 @@ public class ChessEngine
             float _eval = -Quiescence(-_beta, -_alpha);
             board.undoMove();
 
-            if (board.getHistory().contains(-256698630273948972L))
+            if (board.getHistory().contains(8350203091080959822L))
             {
                 System.out.println("Evaluation of move " + _capture
                 + " for " + board.getSideToMove() + " is " + _eval);
-                System.out.println("Fen is " + board.getFen());
                 System.out.println();
             }
 
-            if (_alpha >= _beta)
-                return _beta;
+            if (_eval >= _beta)
+                return _eval;
 
             _alpha = Math.max(_alpha, _eval);
         }
@@ -445,6 +469,7 @@ public class ChessEngine
             System.out.println("Black mat: " + _blackMaterial);
             System.out.println("White pos: " + _whitePosition);
             System.out.println("Black pos: " + _blackPosition);
+            System.out.println("Endgame weight: " + _ENDGAME_WEIGHT);
         }
 
         return (_whiteMaterial + _whitePosition) - (_blackMaterial + _blackPosition);
@@ -507,13 +532,13 @@ public class ChessEngine
      * @return the evaluation of the board for a side based on its positional aspects.
      * A more positive number indicates that the position is better for the side being evaluated.
      */
-    private float EvaluatePosition(Side _perspective, float _endgameWeight,
+    private float EvaluatePosition(Side _side, float _endgameWeight,
     List<Square> _pawnLocations, List<Square> _knightLocations, List<Square> _bishopLocations,
     List<Square> _rookLocations, Square _queenLocation, Square _kingLocation)
     {
         return EvaluatePiecePlacement
         (
-            _perspective, _endgameWeight, _pawnLocations, _knightLocations,
+            _side, _endgameWeight, _pawnLocations, _knightLocations,
             _bishopLocations, _rookLocations, _queenLocation, _kingLocation
         )
         + EvaluatePieceMobility
@@ -521,7 +546,9 @@ public class ChessEngine
             _knightLocations, _bishopLocations,
             _rookLocations, _queenLocation
         )
-        + EvaluatePawnStructure(_pawnLocations) + EvaluateKingSafety(_kingLocation);
+        + EvaluatePawnStructure(_pawnLocations)
+        // clamping so that king safety does not have an affect in the endgame
+        + EvaluateKingSafety(_side, _kingLocation, _queenLocation) * Clamp(0.735f - _endgameWeight, 0f, 1f);
     }
 
     /**
@@ -566,11 +593,15 @@ public class ChessEngine
 
         float _endgameWeight = 1f;
 
+        final float _PIECE_WEIGHT_SUM = (_numPawns * PAWN_VALUE * PAWN_WEIGHT) +
+        (_numMinorPieces * BISHOP_VALUE * MINOR_PIECE_WEIGHT) + (_numRooks * ROOK_VALUE * ROOK_WEIGHT)
+        + (_numQueens * QUEEN_VALUE * QUEEN_WEIGHT);
+        final float _MAX_WEIGHT_SUM = 16 * PAWN_VALUE * PAWN_WEIGHT + 8 * BISHOP_VALUE * MINOR_PIECE_WEIGHT
+        + 4 * ROOK_VALUE * ROOK_WEIGHT + 2 * QUEEN_VALUE * QUEEN_WEIGHT;
+
         // dividing by max result to "normalize" the subtraction
         // and keep it in the range 0 to 1
-        _endgameWeight -= ((_numPawns * PAWN_VALUE) / 2 + _numMinorPieces * BISHOP_VALUE
-        + _numRooks * ROOK_VALUE * 1.095 + _numQueens * QUEEN_VALUE * 1.2) / (8 * PAWN_VALUE + 8 * BISHOP_VALUE
-        + 4 * ROOK_VALUE * 1.095 + 2 * QUEEN_VALUE * 1.2);
+        _endgameWeight -= _PIECE_WEIGHT_SUM / _MAX_WEIGHT_SUM;
 
         return _endgameWeight;
     }
@@ -811,10 +842,19 @@ public class ChessEngine
         return _pawnStructurePenalty;
     }
 
-    // TODO
-    // this function should take into account the endgame weight
-    private float EvaluateKingSafety(Square _kingLocation)
+    // TODO: fix error that occurs when this function is uncommented and playing a game
+    private float EvaluateKingSafety(Side _side, Square _kingLocation, Square _queenLocation)
     {
+        // board.setPiece(Piece.make(_side, PieceType.QUEEN), _kingLocation);
+        // board.setPiece(Piece.make(_side, PieceType.PAWN), _queenLocation);
+
+        // List<Move> _movesIfKingWasQueen = new ArrayList<>();
+        // MoveGenerator.generateQueenMoves(board, _movesIfKingWasQueen);
+
+        // board.setPiece(Piece.make(_side, PieceType.KING), _kingLocation);
+        // board.setPiece(Piece.make(_side, PieceType.QUEEN), _queenLocation);
+
+        // return _movesIfKingWasQueen.size() * KING_AS_QUEEN_MOVEMENT_PENALTY;
         return 0f;
     }
     //#endregion
@@ -844,8 +884,17 @@ public class ChessEngine
         {
             if (_isQuiescence)
             {
-                if (!board.isMoveLegal(_moveToOrder, false))
-                    continue;
+                try {
+                    if (!board.isMoveLegal(_moveToOrder, false))
+                        continue;
+                }
+                
+                catch (Exception e) {
+                    System.out.println("Board:\n" + board);
+                    System.out.println("Fen: " + board.getFen());
+                    System.out.println("Move: " + _moveToOrder);
+                    throw new IllegalAccessError();
+                }
             }
 
             float _moveEvaluationGuess = 0f;
@@ -968,6 +1017,17 @@ public class ChessEngine
     private float Lerp(float _valOne, float _valTwo, float _time)
     {
         return _valOne + _time * (_valTwo - _valOne);
+    }
+    
+    private float Clamp(float _clampTarget, float _min, float _max)
+    {
+        if (_clampTarget > _max)
+            _clampTarget = _max;
+
+        if (_clampTarget < _min)
+            _clampTarget = _min;
+
+        return _clampTarget;
     }
     //#endregion
 }

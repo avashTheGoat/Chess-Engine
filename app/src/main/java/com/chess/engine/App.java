@@ -15,22 +15,40 @@ public class App
     {
         // BenchmarkEngine("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1", 4, false, false, true, true, true);
     
-        // tactical blunder that shouldn't happen with quiescence
-        BenchmarkEngine("r1bqkb1r/ppp1pppp/8/n2p4/2PPn3/3B1N2/PP2QPPP/RNB1K2R b KQkq - 0 1", 3, false, false, true, true, true);
-        // quiescence doesn't take back knight for some reason
+        // quiescence no longer makes blunder of taking pawn w/ knight
+        // BenchmarkEngine("r1bqkb1r/ppp1pppp/8/n2p4/2PPn3/3B1N2/PP2QPPP/RNB1K2R b KQkq - 0 1", 3, false, false, true, true, true);
+        // quiescence doesn't take the knight for some reason
         // BenchmarkEngine("r1bqkb1r/ppp1pppp/8/3p4/2nPn3/3B1N2/PP2QPPP/RNB1K2R w KQkq - 0 1", 3, false, false, true, true, true);
+
+        // tactic with bishop takes that is missed
+        // BenchmarkEngine("r1bq1rk1/pppp1ppp/2n5/8/1b2n3/1NN1B3/PPP1KPPP/R2Q1B1R b - - 5 8", 3, false, false, false, false, true);
 
         // Board test = new Board();
         // test.loadFromFen("r1bqkb1r/ppp1pppp/8/8/2pPn3/5N2/PP2QPPP/RNB1K2R w KQkq - 0 1");
         // System.out.println(test.getZobristKey());
 
         // ChessEngine _engine = new ChessEngine(new Board());
-        // _engine.getBoard().loadFromFen("r1b1kb1r/ppp1pppp/8/8/2pqQ3/5N2/PP3PPP/RNB1K2R w KQkq - 0 4");
+        // _engine.getBoard().loadFromFen("r1bq1rk1/pppp1ppp/2n5/8/4n3/1NP1B3/P1P1KPPP/R2Q1B1R b - - 0 9");
 
-        // System.out.println("Evaluation: " + _engine.Evaluate(true));
         // System.out.println("Zobrist key: " + _engine.getBoard().getZobristKey());
 
-        // PlayGame(Side.WHITE, 3);
+        PlayGame(Side.WHITE, 3);
+
+        // Board board = new Board();
+        // board.loadFromFen("8/1pq5/8/p2k4/7P/PQ3K2/1P6/8 w HAha - 0 1");
+        // List<Move> queenMoves = new ArrayList<>();
+        // MoveGenerator.generateQueenMoves(board, queenMoves);
+
+        // System.out.println("Before changing king to queen: " + queenMoves);
+
+        // board.setPiece(Piece.WHITE_QUEEN, board.getKingSquare(Side.WHITE));
+        // MoveGenerator.generateQueenMoves(board, queenMoves);
+
+        // System.out.println("After changing king to queen: " + queenMoves);
+
+        // ChessEngine engine = new ChessEngine(new Board());
+        // engine.getBoard().loadFromFen("rnbqkbnr/1ppppppp/8/8/8/8/8/RNBQKBNR w KQkq - 0 1");
+        // engine.Evaluate(false);
     }
     
     private static void BenchmarkEngine(String _fen, int _maxPlies, boolean _shouldRunIntermediatePlies,
@@ -49,8 +67,8 @@ public class App
         System.out.println(_board.toString());
         System.out.println();
 
-        System.out.println("Ply 0 (short-sighted evaluation): ");
-        System.out.println(_engine.Evaluate(true));
+        // System.out.println("Ply 0 (short-sighted evaluation): ");
+        // System.out.println(_engine.Evaluate(true));
 
         System.out.println();
 
@@ -182,6 +200,7 @@ public class App
 
         while (!_engine.getBoard().isDraw() || !_engine.getBoard().isMated())
         {
+            System.out.println("Immediate eval: " + _engine.Evaluate(false));
             if (_playerSide == Side.WHITE)
             {
                 if (_board.getSideToMove() == Side.WHITE)
@@ -213,10 +232,6 @@ public class App
                     if (_engineMove.getScore() == -Float.MAX_VALUE) break;
 
                     _engine.getBoard().doMove(_engineMove.getMove());
-    
-                    System.out.println("Engine move: " + _engineMove.getMove());
-                    System.out.println("Immediate eval: " + _engine.Evaluate(false));
-                    System.out.println("Hash: " + _engine.getBoard().getZobristKey());
 
                     System.out.println(_engine.getBoard().toString());
     
