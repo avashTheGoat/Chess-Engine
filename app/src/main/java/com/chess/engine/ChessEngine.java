@@ -410,20 +410,29 @@ public class ChessEngine
      */
     public float Evaluate(boolean _debug)
     {
+        Square _whiteKingLocation = board.getFistPieceLocation(Piece.WHITE_KING);
+        
+        if (board.isMated())
+        {
+            if (board.squareAttackedBy(_whiteKingLocation, Side.BLACK) != 0L)
+                return -Float.MAX_VALUE;
+
+            else return Float.MAX_VALUE;
+        }
+        
         List<Square> _whitePawnLocations = board.getPieceLocation(Piece.WHITE_PAWN);
         List<Square> _whiteKnightLocations = board.getPieceLocation(Piece.WHITE_KNIGHT);
         List<Square> _whiteBishopLocations = board.getPieceLocation(Piece.WHITE_BISHOP);
         List<Square> _whiteRookLocations = board.getPieceLocation(Piece.WHITE_ROOK);
         Square _whiteQueenLocation = board.getFistPieceLocation(Piece.WHITE_QUEEN);
-        Square _whiteKingLocation = board.getFistPieceLocation(Piece.WHITE_KING);
         boolean _isThereWhiteQueen = _whiteQueenLocation != Square.NONE;
-
+        
+        Square _blackKingLocation = board.getFistPieceLocation(Piece.BLACK_KING);
         List<Square> _blackPawnLocations = board.getPieceLocation(Piece.BLACK_PAWN);
         List<Square> _blackKnightLocations = board.getPieceLocation(Piece.BLACK_KNIGHT);
         List<Square> _blackBishopLocations = board.getPieceLocation(Piece.BLACK_BISHOP);
         List<Square> _blackRookLocations = board.getPieceLocation(Piece.BLACK_ROOK);
         Square _blackQueenLocation = board.getFistPieceLocation(Piece.BLACK_QUEEN);
-        Square _blackKingLocation = board.getFistPieceLocation(Piece.BLACK_KING);
         boolean _isThereBlackQueen = _blackQueenLocation != Square.NONE;
 
         final float _ENDGAME_WEIGHT = CalculateEndgameWeight
