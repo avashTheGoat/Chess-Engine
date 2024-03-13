@@ -28,11 +28,11 @@ public class App
         // System.out.println(test.getZobristKey());
 
         // ChessEngine _engine = new ChessEngine(new Board());
-        // _engine.getBoard().loadFromFen("r1bq1rk1/pppp1ppp/2n5/8/4n3/1NP1B3/P1P1KPPP/R2Q1B1R b - - 0 9");
+        // _engine.getBoard().loadFromFen("rnb1kbnr/ppp1pppp/8/3p4/4PP2/5N1P/PPPP3P/RNBQKB1R b KQkq - 0 1");
 
         // System.out.println("Zobrist key: " + _engine.getBoard().getZobristKey());
 
-        PlayGame(Side.WHITE, 3);
+        // PlayGame(Side.WHITE, 3);
 
         // Board board = new Board();
         // board.loadFromFen("8/1pq5/8/p2k4/7P/PQ3K2/1P6/8 w HAha - 0 1");
