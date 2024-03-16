@@ -213,10 +213,10 @@ public class ChessEngine
             Square _whiteKingLocation = board.getKingSquare(Side.WHITE);
 
             if (board.squareAttackedBy(_whiteKingLocation, Side.BLACK) != 0L)
-                return new ScoredMove(new Move(Square.NONE, Square.NONE), Float.MAX_VALUE * GetSideMultiplier());
+                return new ScoredMove(new Move(Square.NONE, Square.NONE), Float.MAX_VALUE);
 
             else
-                return new ScoredMove(new Move(Square.NONE, Square.NONE), Float.MAX_VALUE * GetSideMultiplier());
+                return new ScoredMove(new Move(Square.NONE, Square.NONE), -Float.MAX_VALUE);
         }
         //#endregion
 
@@ -325,7 +325,7 @@ public class ChessEngine
             Square _whiteKingLocation = board.getKingSquare(Side.WHITE);
 
             if (board.squareAttackedBy(_whiteKingLocation, Side.BLACK) != 0L)
-                return Float.MAX_VALUE * GetSideMultiplier();
+                return -Float.MAX_VALUE;
 
             // if white king is not attacked, black king must be mated
             else return Float.MAX_VALUE * GetSideMultiplier();
