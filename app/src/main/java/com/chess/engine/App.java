@@ -13,13 +13,7 @@ public class App
 {
     public static void main(String[] args)
     {
-        // Board _board = new Board();
-        // _board.loadFromFen("r1bq1rk1/pppp1ppp/2n5/8/4n3/1Nb1B3/PPP1KPPP/R2Q1B1R w - - 5 8");
-
-        // System.out.println("Key: " + _board.getZobristKey());
-
-        // tactic with bishop takes that is NO LONGER missed
-        // BenchmarkEngine("r1bq1rk1/pppp1ppp/2n5/8/1b2n3/1NN1B3/PPP1KPPP/R2Q1B1R b - - 5 8", 4, false, false, false, false, true);
+        PlayGame(Side.BLACK, 4);
     }
     
     private static void BenchmarkEngine(String _fen, int _maxPlies, boolean _shouldRunIntermediatePlies,

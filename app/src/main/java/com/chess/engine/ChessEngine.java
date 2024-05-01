@@ -316,18 +316,17 @@ public class ChessEngine
     MutableInt _numPositionsEvaluatedReciever, float _alpha, float _beta, int _ply)
     {
         //#region Exit conditions
-        if (board.isDraw()) return 0f;
+        if (board.isDraw())
+            return 0f;
 
+        // the side whose turn it is currently must be the side
+        // that is mated because it is not possible for a side to
+        // checkmate itself
+
+        // so, always returning -Float.MAX_VALUE because this function uses
+        // negamax algorithm
         if (board.isMated())
-        {
-            Square _whiteKingLocation = board.getKingSquare(Side.WHITE);
-
-            if (board.squareAttackedBy(_whiteKingLocation, Side.BLACK) != 0L)
-                return -Float.MAX_VALUE;
-
-            // if white king is not attacked, black king must be mated
-            else return Float.MAX_VALUE;
-        }
+            return -Float.MAX_VALUE;
 
         if (_ply > _numPlies)
         {
@@ -1030,11 +1029,6 @@ public class ChessEngine
     private int GetSideMultiplier()
     {
         return board.getSideToMove() == Side.WHITE ? 1 : -1;
-    }
-
-    private int GetSideMultiplier(Side _side)
-    {
-        return _side == Side.WHITE ? 1 : -1;
     }
     //#endregion
 }
